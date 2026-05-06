@@ -1,0 +1,82 @@
+"""
+pages/5_Variabilite_temporelle.py — Variabilité temporelle (M05)
+"""
+import streamlit as st, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+st.set_page_config(page_title="Variabilité temporelle", page_icon="📈", layout="wide")
+
+from modules.auth import verifier_auth, afficher_bandeau_utilisateur
+from modules.session import init_session, statut_module, afficher_bandeau_statut
+
+init_session()
+auth_ok, _, role = verifier_auth()
+if not auth_ok: st.stop()
+afficher_bandeau_utilisateur()
+
+st.title("📈 Variabilité temporelle")
+emoji, msg = statut_module("m05_calcule", "Variabilité temporelle")
+afficher_bandeau_statut(emoji, msg)
+if emoji == "🔒":
+    st.info("➡️ Complétez les onglets **Données** et **Configuration** d'abord.")
+    st.stop()
+
+try:
+    from modules.m05_variabilite import figure_variabilite_complete
+except ImportError as e:
+    st.error(f"❌ {e}"); st.stop()
+
+df_clean    = st.session_state.get("df_clean")
+lb_map      = st.session_state.get("lb_map", {})
+lb_stations = st.session_state.get("lb_stations", {})
+df_seuils   = st.session_state.get("df_seuils")
+
+# ── Options ───────────────────────────────────────────────────────────────────
+with st.expander("⚙️ Options", expanded=False):
+    c1, c2, c3, c4, c5 = st.columns(5)
+    statistique      = c1.selectbox("Statistique saisonnalité", ["mediane","moyenne"],
+        format_func=lambda x: {"mediane":"Médiane","moyenne":"Moyenne"}[x])
+    n_colonnes       = c2.slider("Colonnes", 2, 5, 4)
+    n_params_max     = c3.slider("N paramètres max", 6, 30, 18)
+    afficher_lissage = c4.toggle("Lissage séries", True)
+    afficher_ic      = c5.toggle("Bande IC saisonnalité", True)
+
+# ── Calcul ────────────────────────────────────────────────────────────────────
+if st.button("🔬 Calculer la variabilité temporelle", type="primary",
+             use_container_width=True, disabled=(df_clean is None)):
+    with st.spinner("Calcul en cours…"):
+        try:
+            figs, alertes = figure_variabilite_complete(
+                df_clean, lb_map,
+                df_seuils=df_seuils,
+                lb_stations=lb_stations,
+                statistique_saison=statistique,
+                n_colonnes=n_colonnes,
+                n_params_max=n_params_max,
+                afficher_lissage=afficher_lissage,
+                afficher_ic=afficher_ic,
+            )
+            st.session_state["figs_m05"]    = figs
+            st.session_state["m05_calcule"] = True
+            for a in alertes:
+                (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
+            st.success("✅ Variabilité temporelle calculée.")
+            st.rerun()
+        except Exception as e:
+            import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
+
+# ── Affichage ─────────────────────────────────────────────────────────────────
+figs = st.session_state.get("figs_m05")
+if figs:
+    TITRES = {"boxplots":"Distributions", "series":"Séries temporelles", "saison":"Profils saisonniers"}
+    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
+    for tab, (nom, fig) in zip(tabs, figs.items()):
+        with tab:
+            st.pyplot(fig, use_container_width=True)
+            from modules.m08_export import exporter_figure
+            c1, c2 = st.columns(2)
+            c1.download_button("⬇️ PNG", exporter_figure(fig, "png"), f"m05_{nom}.png", "image/png", key=f"dl_png_{nom}")
+            c2.download_button("⬇️ SVG", exporter_figure(fig, "svg"), f"m05_{nom}.svg", "image/svg+xml", key=f"dl_svg_{nom}")
+
+st.markdown("---")
+st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)

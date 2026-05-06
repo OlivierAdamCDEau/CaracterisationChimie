@@ -1,0 +1,26 @@
+cookie:
+  expiry_days: 1
+  key: cdeaux_chimie_globale_2024
+  name: cdeaux_auth_cookie
+credentials:
+  usernames:
+    admin:
+      email: admin@cdeaux.fr
+      logged_in: false
+      name: Administrateur
+      password: $2b$12$gQH0J3ukrTrZ62p/HVjuuuXVKvWsuwfCewFTYiHACtFYJ8GFSOIcO
+      role: admin
+    client:
+      email: client@cdeaux.fr
+      logged_in: false
+      name: Client
+      password: $2b$12$62lNZrV02.QHxRC.PSg95Ool7G4X7zPYU1UzYHt2M8hQaF5MLEREC
+      role: client
+    collaborateur:
+      email: collaborateur@cdeaux.fr
+      logged_in: false
+      name: Collaborateur
+      password: $2b$12$zsaOE.iAIineSdwNC.Zp0uYtsAHrv4n/qqY/t4IdoeNK1Kj8oAxNy
+      role: collaborateur
+pre-authorized:
+  emails: []
