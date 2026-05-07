@@ -1,4 +1,4 @@
-# 🌊 Analyse Chroniques Qualité Eau
+# 🌊 Caractérisation Qualité Eau
 
 Outil d'analyse des chroniques de qualité physico-chimique des eaux de surface.  
 Application Streamlit — accès restreint aux personnes autorisées.
