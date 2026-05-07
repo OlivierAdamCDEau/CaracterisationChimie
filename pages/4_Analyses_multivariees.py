@@ -1,11 +1,13 @@
 """
 pages/4_Analyses_multivariees.py — Analyses multivariées (M04)
+Options réservées aux rôles admin/collaborateur.
 """
 import streamlit as st, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Analyses multivariées", page_icon="📊", layout="wide")
-from modules.auth import verifier_auth, afficher_bandeau_utilisateur
+
+from modules.auth import verifier_auth, afficher_bandeau_utilisateur, verifier_droit
 from modules.session import init_session, statut_module, afficher_bandeau_statut
 
 init_session()
@@ -29,22 +31,33 @@ pivot_norm     = st.session_state.get("pivot_norm")
 pivot_fam_norm = st.session_state.get("pivot_fam_norm")
 lb_map         = st.session_state.get("lb_map", {})
 lb_stations    = st.session_state.get("lb_stations", {})
-fam_map        = st.session_state.get("fam_map", {})
+fam_map        = st.session_state.get("fam_map") or {}
 
-# ── Options ───────────────────────────────────────────────────────────────────
-with st.expander("⚙️ Options ACP / Clustering", expanded=False):
-    c1, c2, c3, c4 = st.columns(4)
-    n_vecteurs       = c1.slider("N vecteurs biplot", 5, 20, 10)
-    corpus_commun    = c2.toggle("Corpus commun (ACP)", value=False,
-        help="Restreindre l'ACP aux seuls paramètres analysés dans toutes les stations.")
-    seuil_imputation = c3.slider("Seuil imputation (%)", 10, 50, 20, 5,
-        help="Stations dépassant ce taux s'affichent en cercle creux dans le biplot.") / 100
-    methode_linkage  = c4.selectbox("Méthode clustering", ["ward","complete","average"],
-        format_func=lambda x: {"ward":"Ward (défaut)","complete":"Complet","average":"Moyen"}[x])
+# Nettoyer fam_map : exclure les valeurs NaN/None (cause du bug TypeError)
+fam_map = {k: str(v) for k, v in fam_map.items() if v is not None and str(v) not in ("nan", "", "None")}
+
+peut_configurer = verifier_droit("config")
+
+# ── Options (admin/collaborateur uniquement) ──────────────────────────────────
+n_vecteurs       = 10
+corpus_commun    = False
+seuil_imputation = 0.20
+methode_linkage  = "ward"
+
+if peut_configurer:
+    with st.expander("⚙️ Options", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        n_vecteurs       = c1.slider("N vecteurs biplot", 5, 20, 10)
+        corpus_commun    = c2.toggle("Corpus commun (ACP)", False,
+            help="Restreindre l'ACP aux paramètres analysés dans toutes les stations.")
+        seuil_imputation = c3.slider("Seuil imputation (%)", 10, 50, 20, 5,
+            help="Stations dépassant ce taux s'affichent en cercle creux.") / 100
+        methode_linkage  = c4.selectbox("Méthode clustering", ["ward","complete","average"],
+            format_func=lambda x: {"ward":"Ward (défaut)","complete":"Complet","average":"Moyen"}[x])
 
 # ── Calcul ────────────────────────────────────────────────────────────────────
-if st.button("🔬 Calculer les analyses multivariées", type="primary", use_container_width=True,
-             disabled=(pivot_norm is None)):
+if st.button("🔬 Calculer les analyses multivariées", type="primary",
+             use_container_width=True, disabled=(pivot_norm is None)):
     with st.spinner("Calcul en cours…"):
         try:
             figs, alertes = figure_multivar_complete(
@@ -82,8 +95,10 @@ if figs:
             st.pyplot(fig, use_container_width=True)
             from modules.m08_export import exporter_figure
             c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(fig, "png"), f"m04_{nom}.png", "image/png")
-            c2.download_button("⬇️ SVG", exporter_figure(fig, "svg"), f"m04_{nom}.svg", "image/svg+xml")
+            c1.download_button("⬇️ PNG", exporter_figure(fig,"png"),
+                f"m04_{nom}.png","image/png", key=f"png4_{nom}")
+            c2.download_button("⬇️ SVG", exporter_figure(fig,"svg"),
+                f"m04_{nom}.svg","image/svg+xml", key=f"svg4_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)
