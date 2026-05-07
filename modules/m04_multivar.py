@@ -541,7 +541,7 @@ def biplot_acp(
     ratio_leg = max(0.12, min(0.06 + 0.045 * n_lig_leg, 0.28))
 
     fig = plt.figure(figsize=(figsize[0], figsize[1] + 1.0), dpi=dpi)
-    gs  = fig.add_gridspec(2, 1, height_ratios=[1 - ratio_leg, ratio_leg], hspace=0.08)
+    gs  = fig.add_gridspec(2, 1, height_ratios=[1 - ratio_leg, ratio_leg], hspace=0.22)
     ax     = fig.add_subplot(gs[0])
     ax_leg = fig.add_subplot(gs[1])
     ax_leg.axis("off")
@@ -656,37 +656,21 @@ def biplot_acp(
     a_imputation = any(taux_imputation.get(s, 0.0) > seuil_imputation for s in stations)
     titre_st = "Stations  (* = imputation > seuil)" if a_imputation else "Stations"
 
-    # ── Légendes dans le panneau dédié ax_leg ──
+    # ── Légende familles uniquement dans le panneau dédié ax_leg ──
+    # Les stations sont lisibles directement sur la figure (libellés sur les points)
     import matplotlib.lines as mlines
 
     if patches_fam:
-        leg_st = ax_leg.legend(
-            handles=patches_st,
-            fontsize=7, loc="upper left",
-            bbox_to_anchor=(0.0, 1.0),
-            ncol=min(len(patches_st), 4),
-            framealpha=0.90, edgecolor="#BFDBFE",
-            title=titre_st, title_fontsize=7,
-        )
-        ax_leg.add_artist(leg_st)
         ax_leg.legend(
             handles=patches_fam,
-            fontsize=7, loc="upper right",
-            bbox_to_anchor=(1.0, 1.0),
-            ncol=1 if len(patches_fam) <= 8 else 2,
+            fontsize=7, loc="upper center",
+            bbox_to_anchor=(0.5, 0.90),
+            ncol=min(len(patches_fam), 5) if len(patches_fam) <= 10 else 3,
             framealpha=0.90, edgecolor="#BFDBFE",
-            title="Familles (vecteurs)", title_fontsize=7,
+            title="Familles chimiques (couleur des vecteurs)", title_fontsize=7,
             handlelength=1.0,
         )
-    else:
-        ax_leg.legend(
-            handles=patches_st,
-            fontsize=7, loc="upper center",
-            bbox_to_anchor=(0.5, 1.0),
-            ncol=min(len(patches_st), 6),
-            framealpha=0.90, edgecolor="#BFDBFE",
-            title=titre_st, title_fontsize=7,
-        )
+    # Si pas de familles : panneau légende vide mais conservé pour l'espacement
 
     _ajouter_watermark(fig, ax=ax_leg)
     return fig, alertes
@@ -737,7 +721,19 @@ def biplot_double_projection(
             figsize=(figsize[0] // 2, figsize[1]), dpi=dpi,
         )
 
-    fig, axes = plt.subplots(1, 2, figsize=figsize, dpi=dpi)
+    # Mise en page : 2 lignes — biplots côte à côte en haut, légende familles en bas
+    n_fam_glob = 0  # sera mis à jour après calcul palette
+    ratio_leg_dp = 0.18   # fraction réservée à la légende (fixe pour double projection)
+
+    fig = plt.figure(figsize=(figsize[0], figsize[1] + 1.0), dpi=dpi)
+    gs_dp = fig.add_gridspec(
+        2, 2,
+        height_ratios=[1 - ratio_leg_dp, ratio_leg_dp],
+        hspace=0.22, wspace=0.3,
+    )
+    axes    = [fig.add_subplot(gs_dp[0, 0]), fig.add_subplot(gs_dp[0, 1])]
+    ax_leg  = fig.add_subplot(gs_dp[1, :])   # toute la largeur pour la légende
+    ax_leg.axis("off")
 
     # Palette familles communes (calculée sur tous les paramètres individuels)
     use_familles = fam_map is not None
@@ -850,52 +846,25 @@ def biplot_double_projection(
                        taux_imputation={}, seuil_imputation=seuil_imputation)
         axes[1].set_title("Familles SANDRE", fontsize=9, fontweight="bold")
 
-    # Légende stations commune (en bas) — avec distinction creux/plein
-    import matplotlib.lines as mlines
-    stations_ref = list(df_ind.index) if not df_ind.empty else list(df_fam.index)
-    taux_ref = taux_imp_ind if not df_ind.empty else {}
-    has_imputed = any(taux_ref.get(s, 0.0) > seuil_imputation for s in stations_ref)
-    patches = []
-    for i, s in enumerate(stations_ref):
-        taux_st = taux_ref.get(s, 0.0)
-        est_impute = taux_st > seuil_imputation
-        lb_leg = _nom_court_station(lb_stations.get(s, s)) if lb_stations else str(s)
-        if est_impute:
-            lb_leg = f"{lb_leg} ({taux_st:.0%}*)"
-        handle = mlines.Line2D(
-            [], [],
-            marker="o", linestyle="None",
-            markerfacecolor="none" if est_impute else _couleur_station(i),
-            markeredgecolor=_couleur_station(i),
-            markeredgewidth=1.6 if est_impute else 0.6,
-            markersize=7, label=lb_leg,
-        )
-        patches.append(handle)
-    fig.legend(
-        handles=patches, fontsize=7, loc="lower center",
-        ncol=min(len(patches), 6), framealpha=0.85,
-        bbox_to_anchor=(0.5, -0.03),
-        title="Stations  (* = imputation > seuil)" if has_imputed else "Stations",
-        title_fontsize=7,
-    )
-
-    # Légende familles sur le panneau gauche (si activée)
+    # Légende familles uniquement dans le panneau dédié (stations lisibles sur la figure)
     if use_familles and couleur_par_famille_glob:
-        n_fam = len(couleur_par_famille_glob)
         patches_fam = [
-            mpatches.Patch(color=c, label=fam)
+            mpatches.Patch(color=c, label=fam, alpha=0.85)
             for fam, c in couleur_par_famille_glob.items()
         ]
-        axes[0].legend(
-            handles=patches_fam, fontsize=7, loc="lower right",
-            framealpha=0.85, ncol=1 if n_fam <= 9 else 2,
-            title="Familles (vecteurs)", title_fontsize=7,
+        n_fam = len(patches_fam)
+        ax_leg.legend(
+            handles=patches_fam,
+            fontsize=7, loc="upper center",
+            bbox_to_anchor=(0.5, 0.90),
+            ncol=min(n_fam, 5) if n_fam <= 10 else 3,
+            framealpha=0.90, edgecolor="#BFDBFE",
+            title="Familles chimiques (couleur des vecteurs — panneau gauche)", title_fontsize=7,
             handlelength=1.0,
         )
 
-    fig.suptitle(titre, fontsize=11, fontweight="bold", y=1.01)
-    _ajouter_watermark(fig, ax=axes[-1])
-    fig.tight_layout()
+    fig.suptitle(titre, fontsize=11, fontweight="bold")
+    _ajouter_watermark(fig, ax=ax_leg)
     return fig, alertes
 
 
