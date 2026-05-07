@@ -121,6 +121,8 @@ def _construire_palette_familles(
         famille_par_code[code] = fam
 
     # Attribution couleurs aux familles (ordre alphabétique pour stabilité)
+    # Forcer tous les noms de familles en str pour éviter TypeError sur sorted()
+    famille_par_code = {k: str(v) for k, v in famille_par_code.items()}
     familles_uniques = sorted(set(famille_par_code.values()))
     couleur_par_famille = {
         fam: PALETTE_FAMILLES[i % len(PALETTE_FAMILLES)]
