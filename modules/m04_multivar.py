@@ -319,106 +319,130 @@ def _placer_labels_biplot(
     couleurs: list[str],
     positions_points: list[tuple[float, float]] | None = None,
     fontsize: int = 8,
-    n_iter: int = 20,
 ) -> None:
     """
-    Pose les labels des vecteurs avec un léger décalage en cas de chevauchement.
-
-    Stratégie : répulsion à courte portée uniquement (s'active seulement quand
-    deux labels se recouvrent), avec une ancre forte qui maintient chaque label
-    près de sa position naturelle au bout du vecteur. Le déplacement maximal
-    est plafonné à la demi-largeur d'un label.
-
-    Si un label a été déplacé de façon significative, un filet pointillé fin
-    relie la pointe du vecteur au label pour conserver le lien visuel.
+    Place les labels des vecteurs sans superposition, style QGIS :
+    pour chaque label, 8 positions candidates autour de la pointe du vecteur
+    sont évaluées ; la moins conflictuelle est retenue. Un filet relie la
+    pointe au label si celui-ci est décalé. Aucun label ne dépasse du cadre.
     """
     if not labels:
         return
+
+    fig = ax.get_figure()
+    fig.canvas.draw()           # nécessaire pour get_window_extent()
+    renderer = fig.canvas.get_renderer()
 
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     rx = xlim[1] - xlim[0]
     ry = ylim[1] - ylim[0]
 
-    # Emprise approximative d'un label en unités data
-    # (calibrée pour des labels de ~15 caractères à 8pt)
-    lw = fontsize * 0.006 * rx   # largeur  ≈ 6‰ de rx par pt de police
-    lh = fontsize * 0.013 * ry   # hauteur  ≈ 13‰ de ry par pt de police
+    # Emprise d'un label en unités data (approximation)
+    lw = fontsize * 0.007 * rx
+    lh = fontsize * 0.016 * ry
+    marge = 0.055   # décalage de base depuis la pointe (fraction de plage)
 
-    # Position initiale : décalage depuis la pointe selon le quadrant
-    marge = 0.04   # fraction de la plage d'axe
-    pos = []
-    for vx, vy in positions_vecteurs:
-        dx = marge * rx * (1.0 if vx >= 0 else -1.0)
-        dy = marge * ry * (1.0 if vy >= 0 else -1.0)
-        pos.append([vx + dx, vy + dy])
-    pos = np.array(pos, dtype=float)
-    pos0 = pos.copy()  # ancre forte
+    # 8 positions candidates (angle, fraction_x, fraction_y)
+    CANDIDATS = [
+        ( 0,  marge,      0),          # droite
+        ( 1,  marge,      marge),      # droite-haut
+        ( 2,  0,          marge),      # haut
+        ( 3, -marge,      marge),      # gauche-haut
+        ( 4, -marge,      0),          # gauche
+        ( 5, -marge,     -marge),      # gauche-bas
+        ( 6,  0,         -marge),      # bas
+        ( 7,  marge,     -marge),      # droite-bas
+    ]
 
-    # Déplacement maximal autorisé : 1.5× la largeur d'un label
-    max_depl_x = 1.5 * lw
-    max_depl_y = 1.5 * lh
+    # Boîtes déjà occupées [x0, y0, x1, y1] en unités data
+    boites_occupees: list[tuple] = []
 
-    # Intensité de la répulsion : très faible, juste pour écarter les labels
-    # qui se chevauchent — la force s'annule dès qu'il n'y a plus de recouvrement
-    k_rep = 0.0015   # fraction de rx² / ry²
-    k_anc = 0.35     # ancre forte : ramène rapidement vers pos0
+    # Ajouter les points stations comme zones interdites
+    if positions_points:
+        r = 0.6 * lw
+        for px, py in positions_points:
+            boites_occupees.append((px - r, py - r, px + r, py + r))
 
-    for _ in range(n_iter):
-        forces = np.zeros_like(pos)
+    def _score(bx0, by0, bx1, by1):
+        """Pénalité = nb de collisions × surface de recouvrement."""
+        score = 0
+        for ox0, oy0, ox1, oy1 in boites_occupees:
+            ov_x = min(bx1, ox1) - max(bx0, ox0)
+            ov_y = min(by1, oy1) - max(by0, oy0)
+            if ov_x > 0 and ov_y > 0:
+                score += ov_x * ov_y
+        # Pénalité si hors cadre
+        if bx0 < xlim[0] or bx1 > xlim[1] or by0 < ylim[0] or by1 > ylim[1]:
+            score += rx * ry  # pénalité forte
+        return score
 
-        # Répulsion label↔label — active seulement si les boîtes se chevauchent
-        for i in range(len(pos)):
-            for j in range(i + 1, len(pos)):
-                dx = pos[i, 0] - pos[j, 0]
-                dy = pos[i, 1] - pos[j, 1]
-                # Recouvrement sur chaque axe (positif = chevauchement)
-                ov_x = lw - abs(dx)
-                ov_y = lh - abs(dy)
-                if ov_x > 0 and ov_y > 0:
-                    # Pousser selon l'axe de moindre recouvrement
-                    if ov_x < ov_y:
-                        fx = k_rep * ov_x * rx * np.sign(dx)
-                        fy = 0.0
-                    else:
-                        fx = 0.0
-                        fy = k_rep * ov_y * ry * np.sign(dy)
-                    forces[i] += [fx, fy]
-                    forces[j] -= [fx, fy]
+    textes_traces = []
 
-        # Ancre forte vers position initiale
-        forces += k_anc * (pos0 - pos)
-
-        pos += forces
-
-    # Clip : ne pas sortir de la zone de tracé
-    pos[:, 0] = np.clip(pos[:, 0], xlim[0] + 0.01 * rx, xlim[1] - 0.01 * rx)
-    pos[:, 1] = np.clip(pos[:, 1], ylim[0] + 0.01 * ry, ylim[1] - 0.01 * ry)
-
-    # Clip : déplacement max par rapport à la position initiale
-    depl = pos - pos0
-    depl[:, 0] = np.clip(depl[:, 0], -max_depl_x, max_depl_x)
-    depl[:, 1] = np.clip(depl[:, 1], -max_depl_y, max_depl_y)
-    pos = pos0 + depl
-
-    # Tracé
-    seuil_filet = 0.025  # fraction de plage → filet si déplacement > seuil
     for i, (label, couleur) in enumerate(zip(labels, couleurs)):
-        lx, ly = pos[i]
         vx, vy = positions_vecteurs[i]
 
-        dist_depl = np.sqrt(((lx - vx) / rx) ** 2 + ((ly - vy) / ry) ** 2)
-        if dist_depl > seuil_filet:
-            ax.plot([vx, lx], [vy, ly], color=couleur, lw=0.5,
-                    alpha=0.45, zorder=6, ls=":")
+        # Aligner ha/va selon le quadrant naturel
+        best_score  = float("inf")
+        best_pos    = (vx + marge * rx, vy)
+        best_ha     = "left"
+        best_va     = "center"
 
-        ha = "left" if lx >= vx else "right"
-        ax.text(
+        for _, fdx, fdy in CANDIDATS:
+            cx = vx + fdx * rx
+            cy = vy + fdy * ry
+
+            # Alignement
+            ha = "left"  if fdx > 0 else ("right" if fdx < 0 else "center")
+            va = "bottom" if fdy > 0 else ("top"  if fdy < 0 else "center")
+
+            # Boîte du label centré sur (cx, cy) selon ha/va
+            if ha == "left":
+                bx0, bx1 = cx, cx + lw
+            elif ha == "right":
+                bx0, bx1 = cx - lw, cx
+            else:
+                bx0, bx1 = cx - lw / 2, cx + lw / 2
+
+            if va == "bottom":
+                by0, by1 = cy, cy + lh
+            elif va == "top":
+                by0, by1 = cy - lh, cy
+            else:
+                by0, by1 = cy - lh / 2, cy + lh / 2
+
+            sc = _score(bx0, by0, bx1, by1)
+            if sc < best_score:
+                best_score = sc
+                best_pos   = (cx, cy)
+                best_ha    = ha
+                best_va    = va
+                best_box   = (bx0, by0, bx1, by1)
+
+        lx, ly = best_pos
+
+        # Clipper aux limites de l'axe avec marge de sécurité
+        lx = np.clip(lx, xlim[0] + 0.01 * rx, xlim[1] - 0.01 * rx)
+        ly = np.clip(ly, ylim[0] + 0.01 * ry, ylim[1] - 0.01 * ry)
+
+        # Filet si déplacé
+        dist = np.sqrt(((lx - vx) / rx)**2 + ((ly - vy) / ry)**2)
+        if dist > 0.01:
+            ax.plot([vx, lx], [vy, ly], color=couleur, lw=0.5,
+                    alpha=0.4, zorder=6, ls=":")
+
+        txt = ax.text(
             lx, ly, label,
             fontsize=fontsize, color=couleur,
-            ha=ha, va="center", zorder=8,
-            bbox=dict(boxstyle="round,pad=0.08", fc="white", ec="none", alpha=0.55),
+            ha=best_ha, va=best_va, zorder=8,
+            clip_on=True,
+            bbox=dict(boxstyle="round,pad=0.08", fc="white", ec="none", alpha=0.60),
         )
+        txt.set_clip_box(ax.bbox)
+        textes_traces.append(txt)
+
+        # Enregistrer la boîte retenue
+        boites_occupees.append(best_box)
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +463,7 @@ def biplot_acp(
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Biplot stations / paramètres",
-    figsize: tuple = (11, 8),
+    figsize: tuple = (11, 9),
     dpi: int = 150,
 ) -> tuple[plt.Figure, list]:
     """
@@ -506,8 +530,21 @@ def biplot_acp(
     else:
         famille_par_code, couleur_par_famille = {}, {}
 
-    # --- Mise en page : zone plot + légendes séparées ---
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    # --- Mise en page : 2 sous-figures empilées (ACP haut, légendes bas) ---
+    n_st    = len(stations)
+    n_fam   = len(couleur_par_famille) if use_familles and couleur_par_famille else 0
+    ncol_st = min(n_st, 4)
+    ncol_f  = 1 if n_fam <= 8 else 2
+    n_lig_st  = max(1, -(-n_st  // ncol_st))
+    n_lig_fam = max(1, -(-n_fam // ncol_f)) if n_fam else 0
+    n_lig_leg = max(n_lig_st, n_lig_fam, 1)
+    ratio_leg = max(0.12, min(0.06 + 0.045 * n_lig_leg, 0.28))
+
+    fig = plt.figure(figsize=(figsize[0], figsize[1] + 1.0), dpi=dpi)
+    gs  = fig.add_gridspec(2, 1, height_ratios=[1 - ratio_leg, ratio_leg], hspace=0.08)
+    ax     = fig.add_subplot(gs[0])
+    ax_leg = fig.add_subplot(gs[1])
+    ax_leg.axis("off")
 
     # --- Points stations ---
     pts_stations = []
@@ -580,8 +617,10 @@ def biplot_acp(
         fontsize=8,
     )
 
-    # --- Légende stations (en haut à gauche, toujours) ---
+    # --- Légendes en dessous de la figure ---
     import matplotlib.lines as mlines
+
+    # Légende stations
     patches_st = []
     for i, s in enumerate(stations):
         taux_st = taux_imputation.get(s, 0.0)
@@ -599,36 +638,57 @@ def biplot_acp(
             label=lb_leg,
         )
         patches_st.append(handle)
-    leg_st = ax.legend(
-        handles=patches_st, fontsize=7, loc="upper left",
-        framealpha=0.85, ncol=max(1, len(stations) // 6),
-        title="Stations  (* = imputation > seuil)" if any(
-            taux_imputation.get(s, 0.0) > seuil_imputation for s in stations
-        ) else "Stations",
-        title_fontsize=7,
-    )
-    ax.add_artist(leg_st)  # permet d'ajouter une 2ᵉ légende
 
-    # --- Légende familles (en bas à droite, si activée) ---
+    # Légende familles si activée
+    patches_fam = []
     if use_familles and couleur_par_famille:
         n_fam = len(couleur_par_famille)
         patches_fam = [
-            mpatches.Patch(color=c, label=fam)
+            mpatches.Patch(color=c, label=fam, alpha=0.85)
             for fam, c in couleur_par_famille.items()
         ]
-        ax.legend(
-            handles=patches_fam,
-            fontsize=7, loc="lower right",
-            framealpha=0.85, ncol=1 if n_fam <= 9 else 2,
-            title="Familles (vecteurs)", title_fontsize=7,
-            handlelength=1.0,
-        )
         alertes.append(
             f"ℹ️ Biplot : {n_fam} famille(s) colorée(s) sur {len(idx_top)} vecteurs affichés."
         )
 
-    _ajouter_watermark(fig, ax=ax)
-    fig.tight_layout()
+    # Ajuster la marge basse pour accueillir la/les légende(s)
+    n_lignes_legende = max(1, len(patches_st) // max(len(patches_st), 1))
+    a_imputation = any(taux_imputation.get(s, 0.0) > seuil_imputation for s in stations)
+    titre_st = "Stations  (* = imputation > seuil)" if a_imputation else "Stations"
+
+    # ── Légendes dans le panneau dédié ax_leg ──
+    import matplotlib.lines as mlines
+
+    if patches_fam:
+        leg_st = ax_leg.legend(
+            handles=patches_st,
+            fontsize=7, loc="upper left",
+            bbox_to_anchor=(0.0, 1.0),
+            ncol=min(len(patches_st), 4),
+            framealpha=0.90, edgecolor="#BFDBFE",
+            title=titre_st, title_fontsize=7,
+        )
+        ax_leg.add_artist(leg_st)
+        ax_leg.legend(
+            handles=patches_fam,
+            fontsize=7, loc="upper right",
+            bbox_to_anchor=(1.0, 1.0),
+            ncol=1 if len(patches_fam) <= 8 else 2,
+            framealpha=0.90, edgecolor="#BFDBFE",
+            title="Familles (vecteurs)", title_fontsize=7,
+            handlelength=1.0,
+        )
+    else:
+        ax_leg.legend(
+            handles=patches_st,
+            fontsize=7, loc="upper center",
+            bbox_to_anchor=(0.5, 1.0),
+            ncol=min(len(patches_st), 6),
+            framealpha=0.90, edgecolor="#BFDBFE",
+            title=titre_st, title_fontsize=7,
+        )
+
+    _ajouter_watermark(fig, ax=ax_leg)
     return fig, alertes
 
 
