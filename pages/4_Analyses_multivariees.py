@@ -100,6 +100,7 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
                 _buf.seek(0)
                 figs_bytes[_nom] = _buf.read()
                 plt.close(_fig)
+            import gc; gc.collect()
             st.session_state["figs_m04"]    = figs_bytes
             st.session_state["m04_calcule"] = True
             for a in alertes:

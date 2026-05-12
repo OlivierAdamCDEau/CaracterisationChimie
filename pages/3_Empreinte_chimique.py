@@ -117,6 +117,7 @@ if st.button("🔬 Calculer l'empreinte chimique", type="primary",
                 buf.seek(0)
                 figs_bytes[nom_fig] = buf.read()
                 plt.close(fig_obj)
+            import gc; gc.collect()
 
             st.session_state["figs_m03"]      = figs_bytes
             st.session_state["pivot_classes"] = pivot_classes_pct

@@ -115,6 +115,7 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
                 _buf.seek(0)
                 figs_bytes[_nom] = _buf.read()
                 plt.close(_fig)
+            import gc; gc.collect()
             st.session_state["figs_m05"]    = figs_bytes
             st.session_state["m05_calcule"] = True
             for a in alertes:

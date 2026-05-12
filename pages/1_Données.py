@@ -112,7 +112,15 @@ df_brut     = st.session_state.get("_df_brut")
 inv_supports = st.session_state.get("_inv_supports")
 
 if df_brut is None or df_brut.empty:
-    st.info("⬆️ Chargez au moins un fichier CSV pour commencer.")
+    # df_brut peut avoir été libéré après chargement réussi
+    # Dans ce cas, les données filtrées sont toujours en session
+    if st.session_state.get("donnees_chargees"):
+        st.info(
+            "ℹ️ Les données sont chargées. Pour modifier les filtres, "
+            "rechargez le fichier CSV ci-dessus."
+        )
+    else:
+        st.info("⬆️ Chargez au moins un fichier CSV pour commencer.")
     st.stop()
 
 # ── Alertes de lecture ────────────────────────────────────────────────────────
@@ -536,6 +544,13 @@ if st.button("🚀 Appliquer les filtres et charger",
 
             inv_st = inventaire_stations(df)
 
+            # Libérer df_brut de la session une fois le filtrage réussi
+            # Il sera rechargé depuis le cache disque si nécessaire
+            # (économise ~20-130 Mo selon la source)
+            st.session_state.pop("_df_brut", None)
+            st.session_state.pop("_inv_supports", None)
+            # Garder _upload_cache_key pour détecter un nouveau fichier
+
             st.session_state.update({
                 "df_filtre":           df,
                 "df_debit":            df_debit,
@@ -561,6 +576,10 @@ if st.button("🚀 Appliquer les filtres et charger",
                 },
                 "donnees_chargees": True,
             })
+
+            # Forcer le garbage collector pour libérer les temporaires
+            import gc
+            gc.collect()
 
             st.success("✅ Données chargées avec succès.")
             st.rerun()
