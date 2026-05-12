@@ -44,40 +44,7 @@ if not auth_ok:
         )
     st.stop()
 
-# ── Bouton de rechargement d'urgence (affiché en cas de plantage) ─────────────
-# Injecté via JavaScript : si l'app ne répond plus, un bouton flottant permet
-# de recharger sans passer par le tableau de bord Streamlit Cloud.
-st.markdown("""
-<style>
-#reload-btn {
-    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
-    z-index: 9999; display: none;
-    background: #dc2626; color: white; border: none; border-radius: 8px;
-    padding: 10px 24px; font-size: 15px; font-weight: 600; cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-</style>
-<button id="reload-btn" onclick="window.location.reload(true)">
-    🔄 Recharger l'app
-</button>
-<script>
-// Affiche le bouton de rechargement si la page est bloquée > 30 secondes
-// (absence de heartbeat Streamlit = app gelée)
-(function() {
-    var btn = document.getElementById('reload-btn');
-    if (!btn) return;
-    var timeout = setTimeout(function() {
-        btn.style.display = 'block';
-    }, 30000);
-    // Annuler si Streamlit répond (mutation du DOM = app vivante)
-    var obs = new MutationObserver(function() {
-        clearTimeout(timeout);
-        timeout = setTimeout(function() { btn.style.display = 'block'; }, 30000);
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
-})();
-</script>
-""", unsafe_allow_html=True)
+# (bouton recharge dans la sidebar — voir ci-dessous)
 
 # Bandeau utilisateur dans la sidebar
 afficher_bandeau_utilisateur()
@@ -102,6 +69,12 @@ with st.sidebar:
         "<p style='font-size:0.72em;color:#9ca3af;text-align:center;margin-top:16px;'>@CDEau</p>",
         unsafe_allow_html=True,
     )
+    st.markdown("---")
+    # Bouton de rechargement d'urgence — toujours accessible dans la barre latérale.
+    # En cas de plantage sur Streamlit Cloud (écran "Oh no"), utiliser
+    # directement l'URL de l'app dans le navigateur pour relancer.
+    if st.button("🔄 Recharger l'app", use_container_width=True, help="Recharge la page sans réinitialiser la session"):
+        st.rerun()
 
 # ── PAGE ACCUEIL ──────────────────────────────────────────────────────────────
 name = st.session_state.get("user_name", username)
