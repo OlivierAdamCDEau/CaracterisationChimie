@@ -1,18 +1,12 @@
 """
-pages/1_Données.py — Chargement des données (M01 v2 multi-sources)
+pages/1_Données.py — Chargement des données (M01 v3)
 
-Formats supportés :
-  • Naïades chimie     (export Hub'Eau, CSV latin-1)
-  • ADES               (eaux souterraines, CSV latin-1)
-  • ARS / CAP          (eau potable, CSV latin-1)
-  • HB-Naïades         (données biologiques, CSV latin-1)
-
-Logique :
-  1. Uploader un ou plusieurs fichiers CSV (formats mélangés acceptés)
-  2. Chaque fichier est auto-détecté (ou forcé manuellement)
-  3. Fusion en un DataFrame commun normalisé
-  4. Filtres optionnels (support, fraction, période, stations)
-  5. Groupement optionnel par Bassin Versant
+Architecture BV robuste :
+  - Tout l'état BV vit dans st.session_state["bv_config"]
+  - Toutes les mutations sont traitées en haut de page, avant tout widget
+  - Les boutons ne font QUE stocker une action dans _bv_action, jamais muter directement
+  - Un seul st.rerun() centralisé après mutation
+  - Aucun expander imbriqué
 """
 import streamlit as st, sys, tempfile, os, json
 import datetime
@@ -35,8 +29,6 @@ afficher_bandeau_utilisateur()
 
 st.title("📂 Données")
 emoji, msg = statut_donnees()
-# Sur l'onglet Données, n'afficher le bandeau que si les données sont chargées
-# (évite le bandeau rouge permanent avant tout chargement, qui est confusant)
 if emoji == "✅":
     afficher_bandeau_statut(emoji, msg)
 
@@ -47,7 +39,6 @@ try:
         filtrer_support_fraction, filtrer_stations,
         filtrer_periode, extraire_debit,
         inventaire_stations, detecter_format,
-        importer_bdd,
     )
 except ImportError as e:
     st.error(f"❌ Module m01_import introuvable : {e}"); st.stop()
@@ -60,7 +51,77 @@ LABELS_FORMAT = {
     "inconnu":"⚪ Format inconnu",
 }
 
-# ── Étape 1 : Upload ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 0 — Traitement centralisé des actions BV
+# ═══════════════════════════════════════════════════════════════════════════════
+# RÈGLE ABSOLUE : ce bloc s'exécute AVANT tout widget.
+# Les boutons ne font que stocker {"action": ..., ...} dans st.session_state["_bv_action"].
+# Ce bloc lit l'action, l'applique, la supprime, puis rerun.
+# Aucune mutation n'a lieu ailleurs dans la page.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if "bv_config" not in st.session_state:
+    st.session_state["bv_config"] = {}
+
+_act = st.session_state.pop("_bv_action", None)
+if _act is not None:
+    _cfg = st.session_state["bv_config"]
+    _type = _act.get("type")
+
+    if _type == "creer":
+        _nom = _act["nom"]
+        if _nom and _nom not in _cfg:
+            _cfg[_nom] = []
+
+    elif _type == "ajouter":
+        _bv  = _act["bv"]
+        _lst = list(_cfg.get(_bv, []))
+        for _s in _act["stations"]:
+            if _s not in _lst:
+                _lst.append(_s)
+        _cfg[_bv] = _lst
+
+    elif _type == "retirer":
+        _bv  = _act["bv"]
+        _lst = list(_cfg.get(_bv, []))
+        _i   = _act["index"]
+        if 0 <= _i < len(_lst):
+            _lst.pop(_i)
+        _cfg[_bv] = _lst
+
+    elif _type == "monter":
+        _bv  = _act["bv"]
+        _lst = list(_cfg.get(_bv, []))
+        _i   = _act["index"]
+        if 0 < _i < len(_lst):
+            _lst[_i-1], _lst[_i] = _lst[_i], _lst[_i-1]
+        _cfg[_bv] = _lst
+
+    elif _type == "descendre":
+        _bv  = _act["bv"]
+        _lst = list(_cfg.get(_bv, []))
+        _i   = _act["index"]
+        if 0 <= _i < len(_lst) - 1:
+            _lst[_i], _lst[_i+1] = _lst[_i+1], _lst[_i]
+        _cfg[_bv] = _lst
+
+    elif _type == "supprimer_bv":
+        _cfg.pop(_act["bv"], None)
+        # Si le BV actif est supprimé, réinitialiser
+        if st.session_state.get("bv_actif") == _act["bv"]:
+            st.session_state["bv_actif"] = None
+
+    elif _type == "charger_json":
+        _cfg.clear()
+        _cfg.update(_act["data"])
+
+    st.session_state["bv_config"] = _cfg
+    st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 1 — Upload fichiers
+# ═══════════════════════════════════════════════════════════════════════════════
+
 st.markdown("### 1. Charger le(s) fichier(s) de données")
 st.markdown(
     "Formats acceptés : **Naïades**, **ADES**, **ARS/CAP**, **HB-Naïades**. "
@@ -78,113 +139,107 @@ if not uploaded_files:
     st.info("⬆️ Chargez au moins un fichier CSV pour commencer.")
     st.stop()
 
-# ── Lecture brute de chaque fichier ──────────────────────────────────────────
-@st.cache_data(show_spinner="Lecture des fichiers…")
-def lire_tous_bruts(files_data: list[tuple[str, bytes]]) -> list[tuple]:
-    """
-    Lit chaque fichier brut et retourne une liste de
-    (nom, df_norm, format_detecte, alertes).
-    """
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 2 — Lecture + fusion (avec cache)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner="Lecture et fusion des fichiers…")
+def charger_et_fusionner(files_data: list[tuple[str, bytes]], format_forces: dict):
+    """Lit, détecte, normalise et fusionne tous les fichiers. Résultat mis en cache."""
     resultats = []
+    tous_alertes = []
     for nom, data in files_data:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb") as tmp:
             tmp.write(data)
             tmp_path = tmp.name
-        fmt = detecter_format(tmp_path)
-        df, alertes = lire_bdd_source(tmp_path, format_force=None)
+        fmt = format_forces.get(nom) or detecter_format(tmp_path)
+        df, alertes = lire_bdd_source(tmp_path, format_force=fmt)
         os.unlink(tmp_path)
-        resultats.append((nom, df, fmt, alertes))
-    return resultats
+        resultats.append((df, nom, fmt, alertes))
+        tous_alertes.extend(alertes)
 
-files_data = [(f.name, f.getvalue()) for f in uploaded_files]
-resultats_lecture = lire_tous_bruts(files_data)
+    dfs = [(df, nom) for df, nom, _, _ in resultats]
+    df_fusion, a_fus = fusionner_sources(dfs)
+    tous_alertes.extend(a_fus)
 
-# ── Affichage par fichier ─────────────────────────────────────────────────────
+    inv = inventaire_supports_fractions(df_fusion)
+    meta_fichiers = [(nom, fmt, alertes) for _, nom, fmt, alertes in resultats]
+    return df_fusion, inv, tous_alertes, meta_fichiers
+
+# Premier passage : détection automatique pour affichage
+files_data_0 = [(f.name, f.getvalue()) for f in uploaded_files]
+format_forces_0 = {f.name: None for f in uploaded_files}
+df_brut_0, inv_0, alertes_0, meta_0 = charger_et_fusionner(
+    files_data_0, format_forces_0
+)
+
+# ── Affichage des fichiers + sélecteurs de format ────────────────────────────
 st.markdown("---")
 st.markdown("### 2. Fichiers chargés")
 
-format_forces = {}   # {nom_fichier: format_force ou None}
-
-for nom, df, fmt_auto, alertes in resultats_lecture:
-    with st.expander(f"📄 {nom} — {LABELS_FORMAT.get(fmt_auto, fmt_auto)}", expanded=True):
-        # Alertes
+format_forces = {}
+for nom, fmt_auto, alertes in meta_0:
+    with st.expander(f"📄 {nom} — {LABELS_FORMAT.get(fmt_auto, fmt_auto)}", expanded=False):
         for a in alertes:
-            (st.error if a.startswith("❌")
-             else st.warning if a.startswith("⚠️")
-             else st.info)(a)
-
-        if df.empty:
-            st.error("❌ Fichier vide ou non reconnu.")
-            format_forces[nom] = None
-            continue
-
-        # Métriques rapides
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Lignes",    f"{len(df):,}")
-        c2.metric("Stations",  df["CdStationMesureEauxSurface"].nunique())
-        c3.metric("Paramètres", df["CdParametre"].nunique())
-        c4.metric("Format",    LABELS_FORMAT.get(fmt_auto, fmt_auto))
-
-        # Option : forcer le format si la détection est douteuse
+            (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
         fmt_choix = st.selectbox(
-            "Format (correction manuelle si nécessaire)",
+            "Format (correction si nécessaire)",
             options=["Auto (" + fmt_auto + ")", "naiade", "ades", "ars", "hb"],
-            index=0,
-            key=f"fmt_{nom}",
-            help="La détection automatique est fiable dans la grande majorité des cas.",
+            index=0, key=f"fmt_{nom}",
         )
         format_forces[nom] = None if fmt_choix.startswith("Auto") else fmt_choix
 
-# ── Inventaire global avant filtres ──────────────────────────────────────────
-@st.cache_data(show_spinner="Fusion des sources…")
-def fusionner_tout(files_data, format_forces):
-    resultats = []
-    for nom, data in files_data:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb") as tmp:
-            tmp.write(data)
-            tmp_path = tmp.name
-        fmt = format_forces.get(nom) or None
-        df, _ = lire_bdd_source(tmp_path, format_force=fmt)
-        os.unlink(tmp_path)
-        resultats.append((df, nom))
-    df_fusion, alertes = fusionner_sources(resultats)
-    inv = inventaire_supports_fractions(df_fusion)
-    return df_fusion, inv, alertes
-
-df_brut, inv_supports, alertes_fusion = fusionner_tout(files_data, format_forces)
+# Recharger si des formats ont été forcés manuellement
+files_data = [(f.name, f.getvalue()) for f in uploaded_files]
+df_brut, inv_supports, alertes_fusion, _ = charger_et_fusionner(
+    files_data, format_forces
+)
 
 st.markdown("---")
 for a in alertes_fusion:
-    (st.error if a.startswith("❌")
-     else st.warning if a.startswith("⚠️")
-     else st.info)(a)
+    (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
 
 if df_brut.empty:
-    st.error("❌ Aucune donnée lisible dans les fichiers fournis.")
-    st.stop()
+    st.error("❌ Aucune donnée lisible."); st.stop()
 
 st.success(
-    f"✅ **{len(df_brut):,} lignes** fusionnées — "
+    f"✅ **{len(df_brut):,} lignes** — "
     f"**{df_brut['CdStationMesureEauxSurface'].nunique()} station(s)** — "
     f"**{df_brut['CdParametre'].nunique()} paramètres**"
 )
 
-# ── Étape 3 : Sélection support / fraction ───────────────────────────────────
+# ── Catalogue stations disponibles (pour tout le reste de la page) ────────────
+stations_dispo = sorted(df_brut["CdStationMesureEauxSurface"].dropna().unique().tolist())
+lb_dispo = {}
+if "LbStationMesureEauxSurface" in df_brut.columns:
+    lb_dispo = (
+        df_brut[["CdStationMesureEauxSurface","LbStationMesureEauxSurface"]]
+        .drop_duplicates("CdStationMesureEauxSurface")
+        .set_index("CdStationMesureEauxSurface")["LbStationMesureEauxSurface"]
+        .fillna("").str.strip()
+        .to_dict()
+    )
+
+def _label_station(code):
+    lb = lb_dispo.get(code, "")
+    return f"{lb} ({code})" if lb else str(code)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 3 — Support / fraction
+# ═══════════════════════════════════════════════════════════════════════════════
+
 st.markdown("### 3. Sélection du support et de la fraction")
 
 if inv_supports.empty:
-    st.error("❌ Impossible de lire les supports/fractions.")
-    st.stop()
+    st.error("❌ Impossible de lire les supports/fractions."); st.stop()
 
-with st.expander("📋 Supports et fractions présents dans le fichier", expanded=True):
+with st.expander("📋 Supports et fractions disponibles", expanded=True):
     st.dataframe(
         inv_supports.rename(columns={
-            "CdSupport":          "Code support",
-            "LbSupport":          "Support",
+            "CdSupport": "Code support", "LbSupport": "Support",
             "CdFractionAnalysee": "Code fraction",
             "LbFractionAnalysee": "Fraction",
-            "NbMesures":          "N mesures",
-            "_source":            "Source",
+            "NbMesures": "N mesures", "_source": "Source",
         }),
         use_container_width=True, hide_index=True,
     )
@@ -193,7 +248,7 @@ supports_dispo = inv_supports[["CdSupport","LbSupport"]].drop_duplicates()
 support_options = {
     row["CdSupport"]: (
         f"{int(row['CdSupport'])} — "
-        f"{str(row['LbSupport']).strip() if pd.notna(row['LbSupport']) else 'Support inconnu'}"
+        f"{str(row['LbSupport']).strip() if pd.notna(row['LbSupport']) else '?'}"
     )
     for _, row in supports_dispo.iterrows()
     if pd.notna(row["CdSupport"])
@@ -206,42 +261,37 @@ cd_support = st.selectbox(
 )
 
 fractions_du_support = inv_supports[inv_supports["CdSupport"] == cd_support]
+_fracs_valides = fractions_du_support[fractions_du_support["CdFractionAnalysee"].notna()]
 fraction_options = {
     row["CdFractionAnalysee"]: (
         f"{int(row['CdFractionAnalysee'])} — "
-        f"{str(row['LbFractionAnalysee']).strip()} "
-        f"({row['NbMesures']:,} mesures)"
+        f"{str(row['LbFractionAnalysee']).strip()} ({row['NbMesures']:,} mesures)"
     )
-    for _, row in fractions_du_support.iterrows()
-    if pd.notna(row["CdFractionAnalysee"])
+    for _, row in _fracs_valides.iterrows()
 }
 
-# Fraction par défaut : la plus mesurée, en ignorant les NaN (cas supports biologiques)
-_fracs_valides = fractions_du_support[fractions_du_support["CdFractionAnalysee"].notna()]
-if not _fracs_valides.empty:
-    fraction_defaut = [_fracs_valides.loc[_fracs_valides["NbMesures"].idxmax(), "CdFractionAnalysee"]]
-else:
-    fraction_defaut = []   # supports biologiques : pas de fraction SANDRE
+fraction_defaut = (
+    [_fracs_valides.loc[_fracs_valides["NbMesures"].idxmax(), "CdFractionAnalysee"]]
+    if not _fracs_valides.empty else []
+)
 
 cd_fractions = st.multiselect(
     "Fraction(s) à analyser",
     options=list(fraction_options.keys()),
     default=fraction_defaut,
     format_func=lambda x: fraction_options.get(x, str(x)),
-    help=(
-        "En cas de doute, gardez la fraction avec le plus de mesures. "
-        "Pour les données biologiques (HB), aucune fraction n'est requise."
-    ),
+    help="Laisser vide uniquement pour les données biologiques HB (pas de fraction SANDRE).",
 )
 
 if not cd_fractions and not _fracs_valides.empty:
-    # Only block if fractions exist but none selected (not the case for HB/biological)
     st.warning("⚠️ Sélectionnez au moins une fraction.")
     st.stop()
 
-# ── Étape 4 : Filtres optionnels ─────────────────────────────────────────────
-st.markdown("### 4. Filtres optionnels")
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 4 — Filtres période + stations
+# ═══════════════════════════════════════════════════════════════════════════════
 
+st.markdown("### 4. Filtres optionnels")
 col1, col2 = st.columns(2)
 
 with col1:
@@ -261,298 +311,251 @@ with col1:
     )
 
 with col2:
-    st.markdown("**Stations** (optionnel)")
-    stations_dispo = sorted(df_brut["CdStationMesureEauxSurface"].dropna().unique().tolist())
-    lb_dispo = {}
-    if "LbStationMesureEauxSurface" in df_brut.columns:
-        lb_dispo = dict(zip(
-            df_brut["CdStationMesureEauxSurface"],
-            df_brut["LbStationMesureEauxSurface"].fillna("").str.strip(),
-        ))
-    stations_selectionnees = st.multiselect(
+    st.markdown("**Stations** (optionnel — remplacé par le BV actif si défini)")
+    stations_manuelles = st.multiselect(
         "Restreindre aux stations",
         options=stations_dispo,
         default=[],
-        format_func=lambda x: f"{lb_dispo.get(x, x)} ({x})",
-        help="Laisser vide = toutes les stations",
+        format_func=_label_station,
+        help="Ignoré si un BV actif est sélectionné ci-dessous.",
+        key="stations_manuelles_sel",
     )
 
-# ── Étape 5 : Groupement par Bassin Versant ───────────────────────────────────
-
-# ══ Traitement des actions BV en attente ══════════════════════════════════════
-# RÈGLE STREAMLIT : on ne peut pas modifier session_state[clé] quand cette clé
-# est liée à un widget affiché. Toutes les mutations sont donc appliquées ici,
-# au niveau racine de la page, AVANT que les widgets soient dessinés.
-# ══════════════════════════════════════════════════════════════════════════════
-if "bv_config" not in st.session_state:
-    st.session_state["bv_config"] = {}
-
-_bv_changed = False
-
-# Création d'un nouveau BV
-if st.session_state.get("_pending_nouveau_bv"):
-    _nom = st.session_state.pop("_pending_nouveau_bv")
-    if _nom and _nom not in st.session_state["bv_config"]:
-        st.session_state["bv_config"][_nom] = []
-    _bv_changed = True
-
-# Ajout de stations à un BV
-for _k, _v in list(st.session_state.items()):
-    if _k.startswith("_pending_add_") and _v:
-        _bv_name = _k[len("_pending_add_"):]
-        _current = st.session_state["bv_config"].get(_bv_name, [])
-        st.session_state["bv_config"][_bv_name] = _current + [
-            s for s in _v if s not in _current
-        ]
-        st.session_state.pop(_k)
-        _bv_changed = True
-
-# Suppression d'un BV
-if st.session_state.get("_pending_del_bv"):
-    _nom = st.session_state.pop("_pending_del_bv")
-    st.session_state["bv_config"].pop(_nom, None)
-    _bv_changed = True
-
-# Montée d'une station
-if st.session_state.get("_pending_up"):
-    _bv_name, _i = st.session_state.pop("_pending_up")
-    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
-    if _i > 0:
-        _lst[_i-1], _lst[_i] = _lst[_i], _lst[_i-1]
-    st.session_state["bv_config"][_bv_name] = _lst
-    _bv_changed = True
-
-# Descente d'une station
-if st.session_state.get("_pending_dn"):
-    _bv_name, _i = st.session_state.pop("_pending_dn")
-    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
-    if _i < len(_lst) - 1:
-        _lst[_i], _lst[_i+1] = _lst[_i+1], _lst[_i]
-    st.session_state["bv_config"][_bv_name] = _lst
-    _bv_changed = True
-
-# Retrait d'une station
-if st.session_state.get("_pending_rm"):
-    _bv_name, _i = st.session_state.pop("_pending_rm")
-    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
-    if 0 <= _i < len(_lst):
-        _lst.pop(_i)
-    st.session_state["bv_config"][_bv_name] = _lst
-    _bv_changed = True
-
-# Chargement d'un fichier JSON de config BV
-if st.session_state.get("_pending_load_bv") is not None:
-    _loaded = st.session_state.pop("_pending_load_bv")
-    st.session_state["bv_config"] = _loaded
-    _bv_changed = True
-
-if _bv_changed:
-    st.rerun()
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 5 — Gestion des Bassins Versants
+# ═══════════════════════════════════════════════════════════════════════════════
 
 st.markdown("### 5. Groupement par Bassin Versant *(optionnel)*")
 
-with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
-    st.markdown(
-        "Regroupez vos stations en Bassins Versants (BV). "
-        "L'ordre des stations sera respecté dans les graphiques et tableaux."
+bv_config = st.session_state["bv_config"]   # référence directe (lecture seule ici)
+
+with st.expander("🗺️ Configurer les Bassins Versants", expanded=bool(bv_config)):
+
+    # ── Sauvegarde / Chargement (en tête, toujours accessible) ───────────────
+    st.markdown("**💾 Sauvegarder / Charger**")
+    sc1, sc2, sc3 = st.columns([2, 1, 2])
+
+    nom_fichier = sc1.text_input(
+        "Nom de fichier", value="config_bv", key="bv_save_name",
+        help="Sans extension — .json ajouté automatiquement",
+    )
+    nom_propre = (nom_fichier.strip() or "config_bv").replace(" ", "_")
+    sc2.markdown("<br>", unsafe_allow_html=True)
+    sc2.download_button(
+        "⬇️ Sauvegarder",
+        data=json.dumps(bv_config, ensure_ascii=False, indent=2),
+        file_name=f"{nom_propre}.json",
+        mime="application/json",
+        use_container_width=True,
+        disabled=not bv_config,
     )
 
-    bv_config: dict = st.session_state["bv_config"]
+    uploaded_cfg = sc3.file_uploader(
+        "⬆️ Charger un fichier JSON", type=["json"], key="bv_cfg_upload",
+    )
+    if uploaded_cfg and "_bv_action" not in st.session_state:
+        try:
+            loaded = json.loads(uploaded_cfg.read())
+            if isinstance(loaded, dict):
+                st.session_state["_bv_action"] = {"type": "charger_json", "data": loaded}
+                # Vider l'uploader avant rerun pour éviter la boucle
+                del st.session_state["bv_cfg_upload"]
+                st.rerun()
+            else:
+                st.error("❌ Format JSON invalide.")
+        except Exception as ex:
+            st.error(f"❌ Erreur : {ex}")
 
-    col_add1, col_add2 = st.columns([3, 1])
-    with col_add1:
-        nouveau_bv = st.text_input(
-            "Nom du nouveau BV",
-            placeholder="ex: Bienne amont, BV Lac de Vouglans…",
-            key="nouveau_bv_input",
+    st.markdown("---")
+
+    # ── Créer un nouveau BV ───────────────────────────────────────────────────
+    st.markdown("**Créer un nouveau BV**")
+    nb1, nb2 = st.columns([3, 1])
+    with nb1:
+        nouveau_bv_nom = st.text_input(
+            "Nom du BV", placeholder="ex: Bienne amont…",
+            key="nouveau_bv_input", label_visibility="collapsed",
         )
-    with col_add2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("➕ Créer le BV", use_container_width=True):
+    with nb2:
+        if st.button("➕ Créer", use_container_width=True, key="btn_creer_bv"):
             nom = st.session_state.get("nouveau_bv_input", "").strip()
             if not nom:
-                st.warning("⚠️ Donnez un nom au BV.")
+                st.warning("⚠️ Saisissez un nom.")
             elif nom in bv_config:
-                st.warning(f"⚠️ Le BV « {nom} » existe déjà.")
+                st.warning(f"⚠️ « {nom} » existe déjà.")
             else:
-                st.session_state["_pending_nouveau_bv"] = nom
+                st.session_state["_bv_action"] = {"type": "creer", "nom": nom}
                 st.rerun()
 
-    # ── Charger / Sauvegarder — toujours accessible ─────────────────────────
-    with st.expander("💾 Sauvegarder / Charger la configuration BV", expanded=False):
-        col_s1, col_s2 = st.columns([3, 1])
-        nom_fichier = col_s1.text_input(
-            "Nom du fichier de sauvegarde",
-            value="config_bv",
-            key="bv_save_name",
-            help="Sans extension — .json sera ajouté automatiquement",
-        )
-        nom_fichier_propre = (nom_fichier.strip() or "config_bv").replace(" ", "_")
-        bv_json = json.dumps(bv_config, ensure_ascii=False, indent=2)
-        col_s2.markdown("<br>", unsafe_allow_html=True)
-        col_s2.download_button(
-            "⬇️ Sauvegarder",
-            data=bv_json,
-            file_name=f"{nom_fichier_propre}.json",
-            mime="application/json",
-            use_container_width=True,
-            disabled=not bv_config,
-        )
-        st.markdown("---")
-        uploaded_cfg = st.file_uploader(
-            "⬆️ Charger une configuration BV (JSON)",
-            type=["json"], key="bv_cfg_upload",
-        )
-        if uploaded_cfg:
-            # Guard : ne traiter que si pas déjà en attente (évite la boucle infinie)
-            if "_pending_load_bv" not in st.session_state:
-                try:
-                    loaded = json.loads(uploaded_cfg.read())
-                    if isinstance(loaded, dict):
-                        st.session_state["_pending_load_bv"] = loaded
-                        # Vider le file_uploader pour couper la boucle
-                        del st.session_state["bv_cfg_upload"]
-                        st.rerun()
-                    else:
-                        st.error("❌ Format JSON invalide (objet attendu).")
-                except Exception as ex:
-                    st.error(f"❌ Erreur de lecture : {ex}")
-
+    # ── Liste des BV et gestion des stations ──────────────────────────────────
     if not bv_config:
-        st.info("Aucun BV configuré. Créez-en un ci-dessus ou chargez une configuration.")
+        st.info("Aucun BV pour l'instant. Créez-en un ci-dessus ou chargez un fichier.")
     else:
-        stations_pool = stations_selectionnees if stations_selectionnees else stations_dispo
+        stations_pool = stations_manuelles if stations_manuelles else stations_dispo
 
         for nom_bv in list(bv_config.keys()):
-            st.markdown(f"---\n#### 🗂️ BV : *{nom_bv}*")
-            col_bv1, col_bv2 = st.columns([4, 1])
+            st.markdown(f"---\n**🗂️ {nom_bv}**")
 
-            with col_bv1:
-                stations_bv = bv_config[nom_bv]
+            stations_bv    = list(bv_config[nom_bv])   # copie locale, lecture seule
+            non_assignees  = [s for s in stations_pool if s not in stations_bv]
 
-                # ── Ajout de stations ─────────────────────────────────────
-                # IMPORTANT : on NE déclenche PAS de rerun() sur le multiselect
-                # lui-même — ça provoquerait un conflit d'état Streamlit quand
-                # les options changent entre deux reruns.
-                # Pattern correct : multiselect + bouton "Ajouter" séparé.
-                non_assignees = [s for s in stations_pool if s not in stations_bv]
-                # Clé du widget multiselect (NE JAMAIS écrire dessus directement)
-                key_ms = f"add_ms_{nom_bv}"
+            # Colonne principale + bouton suppression BV
+            col_main, col_del = st.columns([5, 1])
+
+            with col_main:
+                # ── Ajouter des stations ──────────────────────────────────
+                add_key = f"ms_add_{nom_bv}"
                 st.multiselect(
-                    f"Sélectionner les stations à ajouter au BV « {nom_bv} »",
+                    "Stations à ajouter",
                     options=non_assignees,
                     default=[],
-                    format_func=lambda x: f"{lb_dispo.get(x, x)} ({x})",
-                    key=key_ms,
+                    format_func=_label_station,
+                    key=add_key,
+                    label_visibility="collapsed",
+                    placeholder=f"Sélectionner pour ajouter à « {nom_bv} »…",
                 )
-                if st.button(f"➕ Ajouter au BV « {nom_bv} »",
-                             key=f"add_btn_{nom_bv}", use_container_width=True):
-                    selections = st.session_state.get(key_ms, [])
-                    if selections:
-                        st.session_state[f"_pending_add_{nom_bv}"] = list(selections)
+                if st.button(
+                    f"➕ Ajouter la sélection à « {nom_bv} »",
+                    key=f"btn_add_{nom_bv}",
+                    use_container_width=True,
+                ):
+                    sel = list(st.session_state.get(add_key, []))
+                    if sel:
+                        st.session_state["_bv_action"] = {
+                            "type": "ajouter", "bv": nom_bv, "stations": sel,
+                        }
                         st.rerun()
                     else:
-                        st.warning("⚠️ Sélectionnez au moins une station.")
+                        st.warning("⚠️ Aucune station sélectionnée.")
 
-                # ── Liste des stations déjà dans le BV ───────────────────
+                # ── Liste ordonnée des stations ───────────────────────────
                 if stations_bv:
-                    st.markdown(f"**Stations dans ce BV** ({len(stations_bv)}) — "
-                                "↑ / ↓ pour réordonner, ✖ pour retirer :")
-                    for i, s in enumerate(list(stations_bv)):
-                        c1, c2, c3, c4 = st.columns([7, 1, 1, 1])
-                        c1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
+                    st.markdown(
+                        f"**Stations** ({len(stations_bv)}) "
+                        "— ↑ monter · ↓ descendre · ✖ retirer"
+                    )
+                    for i, s in enumerate(stations_bv):
+                        r1, r2, r3, r4 = st.columns([7, 1, 1, 1])
+                        r1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
+
+                        # ↑ monter
                         if i > 0:
-                            if c2.button("↑", key=f"up_{nom_bv}_{i}", help="Monter"):
-                                st.session_state["_pending_up"] = (nom_bv, i)
+                            if r2.button("↑", key=f"btn_up_{nom_bv}_{i}",
+                                         help="Monter"):
+                                st.session_state["_bv_action"] = {
+                                    "type": "monter", "bv": nom_bv, "index": i,
+                                }
                                 st.rerun()
                         else:
-                            c2.empty()
+                            r2.empty()
+
+                        # ↓ descendre
                         if i < len(stations_bv) - 1:
-                            if c3.button("↓", key=f"dn_{nom_bv}_{i}", help="Descendre"):
-                                st.session_state["_pending_dn"] = (nom_bv, i)
+                            if r3.button("↓", key=f"btn_dn_{nom_bv}_{i}",
+                                         help="Descendre"):
+                                st.session_state["_bv_action"] = {
+                                    "type": "descendre", "bv": nom_bv, "index": i,
+                                }
                                 st.rerun()
                         else:
-                            c3.empty()
-                        if c4.button("✖", key=f"rm_{nom_bv}_{i}", help="Retirer du BV"):
-                            st.session_state["_pending_rm"] = (nom_bv, i)
+                            r3.empty()
+
+                        # ✖ retirer
+                        if r4.button("✖", key=f"btn_rm_{nom_bv}_{i}",
+                                     help="Retirer du BV"):
+                            st.session_state["_bv_action"] = {
+                                "type": "retirer", "bv": nom_bv, "index": i,
+                            }
                             st.rerun()
                 else:
-                    st.caption("Aucune station assignée.")
+                    st.caption("Aucune station encore assignée.")
 
-            with col_bv2:
-                st.markdown("<br><br>", unsafe_allow_html=True)
-                if st.button(f"🗑️ Supprimer\n« {nom_bv} »", key=f"del_{nom_bv}", use_container_width=True):
-                    st.session_state["_pending_del_bv"] = nom_bv
+            with col_del:
+                st.markdown("<br><br><br>", unsafe_allow_html=True)
+                if st.button(
+                    "🗑️ Supprimer", key=f"btn_del_bv_{nom_bv}",
+                    use_container_width=True, help=f"Supprimer le BV « {nom_bv} »",
+                ):
+                    st.session_state["_bv_action"] = {
+                        "type": "supprimer_bv", "bv": nom_bv,
+                    }
                     st.rerun()
 
+    # ── Sélecteur BV actif ────────────────────────────────────────────────────
+    bv_valides = {n: s for n, s in bv_config.items() if s}
+    if bv_valides:
         st.markdown("---")
-        bv_valides = {n: s for n, s in bv_config.items() if s}
-        if bv_valides:
-            bv_choisi = st.selectbox(
-                "BV actif pour les calculs",
-                options=list(bv_valides.keys()),
-                index=(
-                    list(bv_valides.keys()).index(st.session_state.get("bv_actif"))
-                    if st.session_state.get("bv_actif") in bv_valides else 0
-                ),
-            )
-            st.session_state["bv_actif"] = bv_choisi
-            stations_selectionnees = bv_valides[bv_choisi]
-            st.success(
-                f"✅ BV actif : **{bv_choisi}** — "
-                + ", ".join(f"`{lb_dispo.get(s,s)}`" for s in stations_selectionnees)
-            )
-        else:
-            st.session_state["bv_actif"] = None
+        bv_actif_options = list(bv_valides.keys())
+        bv_actif_defaut  = (
+            bv_actif_options.index(st.session_state.get("bv_actif"))
+            if st.session_state.get("bv_actif") in bv_actif_options else 0
+        )
+        bv_choisi = st.selectbox(
+            "**BV actif pour les calculs**",
+            options=bv_actif_options,
+            index=bv_actif_defaut,
+            key="bv_actif_sel",
+        )
+        st.session_state["bv_actif"] = bv_choisi
+        stations_selectionnees = bv_valides[bv_choisi]
+        st.success(
+            f"✅ BV actif : **{bv_choisi}** — "
+            f"{len(stations_selectionnees)} station(s) : "
+            + ", ".join(f"`{lb_dispo.get(s,s)}`" for s in stations_selectionnees)
+        )
+    else:
+        st.session_state["bv_actif"] = None
+        stations_selectionnees = stations_manuelles   # fallback sur sélection manuelle
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 6 — Lancement du filtrage
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ── Étape 6 : Lancement ──────────────────────────────────────────────────────
 st.markdown("---")
-if st.button("🚀 Appliquer les filtres et charger", type="primary", use_container_width=True):
-    with st.spinner("Filtrage et analyse en cours…"):
+if st.button("🚀 Appliquer les filtres et charger",
+             type="primary", use_container_width=True):
+    with st.spinner("Filtrage en cours…"):
         try:
-            # Utiliser df_brut déjà en cache — évite de relire les fichiers
-            # (critique pour les grosses BDD : évite le timeout Streamlit Cloud)
-            df_fus = df_brut
+            df_fus = df_brut   # déjà en cache, pas de relecture
 
-            # Extraire débit (Naïades uniquement)
+            # Débit
             df_debit, a_deb = extraire_debit(df_fus)
             for a in a_deb:
-                (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
+                (st.error if a.startswith("❌")
+                 else st.warning if a.startswith("⚠️") else st.info)(a)
 
-            # Filtre support/fraction (cd_fractions=None = pas de filtre fraction, ex: données biologiques)
+            # Support / fraction
             fracs_arg = list(cd_fractions) if cd_fractions else None
             df, a_sf = filtrer_support_fraction(df_fus, cd_support, fracs_arg)
             for a in a_sf:
-                (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
+                (st.error if a.startswith("❌")
+                 else st.warning if a.startswith("⚠️") else st.info)(a)
 
             if df.empty:
-                st.error("❌ Aucune donnée après filtre support/fraction.")
-                st.stop()
+                st.error("❌ Aucune donnée pour ce support/fraction."); st.stop()
 
-            # Filtre stations
-            stations_finales = stations_selectionnees if stations_selectionnees else None
-            df = filtrer_stations(df, stations_finales)
+            # Stations
+            df = filtrer_stations(df, stations_selectionnees or None)
 
-            # Filtre période
-            kwargs_periode = {}
-            if date_debut: kwargs_periode["date_debut"] = date_debut.strftime("%d/%m/%Y")
-            if date_fin:   kwargs_periode["date_fin"]   = date_fin.strftime("%d/%m/%Y")
-            df, a_per = filtrer_periode(df, **kwargs_periode)
+            # Période
+            kw = {}
+            if date_debut: kw["date_debut"] = date_debut.strftime("%d/%m/%Y")
+            if date_fin:   kw["date_fin"]   = date_fin.strftime("%d/%m/%Y")
+            df, a_per = filtrer_periode(df, **kw)
             for a in a_per:
-                (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
+                (st.error if a.startswith("❌")
+                 else st.warning if a.startswith("⚠️") else st.info)(a)
 
             if df.empty:
-                st.error("❌ Aucune donnée après filtrage. Vérifiez les critères.")
-                st.stop()
+                st.error("❌ Aucune donnée après filtrage."); st.stop()
 
             invalider_depuis_donnees()
 
-            # Ordre stations (BV actif)
             bv_actif = st.session_state.get("bv_actif")
-            bv_cfg = st.session_state.get("bv_config", {})
-            ordre_stations = bv_cfg.get(bv_actif) if bv_actif else None
+            ordre_stations = (
+                st.session_state["bv_config"].get(bv_actif)
+                if bv_actif else None
+            )
 
             inv_st = inventaire_stations(df)
 
@@ -564,10 +567,10 @@ if st.button("🚀 Appliquer les filtres et charger", type="primary", use_contai
                     inv_st["CdStationMesureEauxSurface"],
                     inv_st["LbStationMesureEauxSurface"].fillna("").str.strip(),
                 )),
-                "ordre_stations":  ordre_stations,
-                "bv_actif_nom":    bv_actif,
+                "ordre_stations": ordre_stations,
+                "bv_actif_nom":   bv_actif,
                 "meta_fichier": {
-                    "nom": " + ".join(f.name for f in uploaded_files),
+                    "nom":      " + ".join(f.name for f in uploaded_files),
                     "n_lignes":   len(df),
                     "n_stations": df["CdStationMesureEauxSurface"].nunique(),
                     "n_params":   df["CdParametre"].nunique(),
@@ -589,11 +592,13 @@ if st.button("🚀 Appliquer les filtres et charger", type="primary", use_contai
             st.error(f"❌ Erreur : {e}")
             st.code(traceback.format_exc())
 
-# ── Récapitulatif si données chargées ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# BLOC 7 — Récapitulatif
+# ═══════════════════════════════════════════════════════════════════════════════
+
 if st.session_state.get("donnees_chargees"):
     meta = st.session_state["meta_fichier"]
-    st.markdown("---")
-    st.markdown("### ✅ Données chargées")
+    st.markdown("---\n### ✅ Données chargées")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Stations",   meta.get("n_stations", "?"))
@@ -605,10 +610,11 @@ if st.session_state.get("donnees_chargees"):
 
     sources = meta.get("sources", {})
     if sources:
-        src_str = " | ".join(
-            f"**{LABELS_FORMAT.get(k,k)}** : {v:,}" for k, v in sources.items()
+        st.markdown(
+            "📊 Sources : " + " | ".join(
+                f"**{LABELS_FORMAT.get(k,k)}** : {v:,}" for k, v in sources.items()
+            )
         )
-        st.markdown(f"📊 Sources : {src_str}")
 
     bv_nom = st.session_state.get("bv_actif_nom")
     ordre  = st.session_state.get("ordre_stations")
@@ -627,7 +633,8 @@ if st.session_state.get("donnees_chargees"):
     df_debit = st.session_state.get("df_debit")
     if df_debit is not None and not df_debit.empty:
         st.info(
-            f"💧 Débits disponibles pour **{df_debit['CdStationMesureEauxSurface'].nunique()} station(s)** "
+            f"💧 Débits disponibles pour "
+            f"**{df_debit['CdStationMesureEauxSurface'].nunique()} station(s)** "
             f"({len(df_debit)} mesures)."
         )
     else:
