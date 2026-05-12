@@ -629,6 +629,15 @@ def filtrer_support_fraction(
 
     fractions_dispo = df_support["CdFractionAnalysee"].dropna().unique().tolist()
 
+    # Cas spécial : données biologiques HB sans fraction SANDRE (toutes NaN)
+    # → on retourne toutes les lignes du support sans filtrer la fraction
+    if not fractions_dispo:
+        alertes.append(
+            f"ℹ️ Support {cd_support} : aucune fraction SANDRE renseignée "
+            "(données biologiques) — toutes les lignes retenues."
+        )
+        return df_support.copy(), alertes
+
     if cd_fractions is None:
         fractions_defaut = FRACTIONS_DCE_DEFAUT.get(cd_support, [])
         fractions_ok = [f for f in fractions_defaut if f in fractions_dispo]

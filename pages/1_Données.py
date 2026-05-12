@@ -16,6 +16,8 @@ Logique :
 """
 import streamlit as st, sys, tempfile, os, json
 import datetime
+import pandas as pd
+import numpy as np
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Données — Qualité Eau", page_icon="📂", layout="wide")
@@ -186,7 +188,10 @@ with st.expander("📋 Supports et fractions présents dans le fichier", expande
 
 supports_dispo = inv_supports[["CdSupport","LbSupport"]].drop_duplicates()
 support_options = {
-    row["CdSupport"]: f"{int(row['CdSupport'])} — {str(row['LbSupport']).strip()}"
+    row["CdSupport"]: (
+        f"{int(row['CdSupport'])} — "
+        f"{str(row['LbSupport']).strip() if pd.notna(row['LbSupport']) else 'Support inconnu'}"
+    )
     for _, row in supports_dispo.iterrows()
     if pd.notna(row["CdSupport"])
 }
@@ -208,18 +213,26 @@ fraction_options = {
     if pd.notna(row["CdFractionAnalysee"])
 }
 
-fraction_defaut = fractions_du_support.loc[
-    fractions_du_support["NbMesures"].idxmax(), "CdFractionAnalysee"
-]
+# Fraction par défaut : la plus mesurée, en ignorant les NaN (cas supports biologiques)
+_fracs_valides = fractions_du_support[fractions_du_support["CdFractionAnalysee"].notna()]
+if not _fracs_valides.empty:
+    fraction_defaut = [_fracs_valides.loc[_fracs_valides["NbMesures"].idxmax(), "CdFractionAnalysee"]]
+else:
+    fraction_defaut = []   # supports biologiques : pas de fraction SANDRE
+
 cd_fractions = st.multiselect(
     "Fraction(s) à analyser",
     options=list(fraction_options.keys()),
-    default=[fraction_defaut],
+    default=fraction_defaut,
     format_func=lambda x: fraction_options.get(x, str(x)),
-    help="En cas de doute, gardez la fraction avec le plus de mesures.",
+    help=(
+        "En cas de doute, gardez la fraction avec le plus de mesures. "
+        "Pour les données biologiques (HB), aucune fraction n'est requise."
+    ),
 )
 
-if not cd_fractions:
+if not cd_fractions and not _fracs_valides.empty:
+    # Only block if fractions exist but none selected (not the case for HB/biological)
     st.warning("⚠️ Sélectionnez au moins une fraction.")
     st.stop()
 
@@ -420,8 +433,9 @@ if st.button("🚀 Appliquer les filtres et charger", type="primary", use_contai
             for a in a_deb:
                 (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
 
-            # Filtre support/fraction
-            df, a_sf = filtrer_support_fraction(df_fus, cd_support, list(cd_fractions))
+            # Filtre support/fraction (cd_fractions=None = pas de filtre fraction, ex: données biologiques)
+            fracs_arg = list(cd_fractions) if cd_fractions else None
+            df, a_sf = filtrer_support_fraction(df_fus, cd_support, fracs_arg)
             for a in a_sf:
                 (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
 
