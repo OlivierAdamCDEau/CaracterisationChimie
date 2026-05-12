@@ -287,6 +287,15 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
         st.session_state["bv_config"] = {}
     bv_config: dict = st.session_state["bv_config"]
 
+    # Appliquer la création de BV en attente (issue du run précédent)
+    # AVANT de dessiner les widgets, pour éviter le conflit session_state/widget
+    if st.session_state.get("_pending_nouveau_bv"):
+        nom_a_creer = st.session_state.pop("_pending_nouveau_bv")
+        if nom_a_creer and nom_a_creer not in bv_config:
+            bv_config[nom_a_creer] = []
+            st.session_state["bv_config"] = bv_config
+        st.rerun()
+
     col_add1, col_add2 = st.columns([3, 1])
     with col_add1:
         nouveau_bv = st.text_input(
@@ -297,14 +306,14 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
     with col_add2:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("➕ Créer le BV", use_container_width=True):
-            nom = nouveau_bv.strip()
+            nom = st.session_state.get("nouveau_bv_input", "").strip()
             if not nom:
                 st.warning("⚠️ Donnez un nom au BV.")
             elif nom in bv_config:
                 st.warning(f"⚠️ Le BV « {nom} » existe déjà.")
             else:
-                bv_config[nom] = []
-                st.session_state["bv_config"] = bv_config
+                # Stocker dans clé intermédiaire, ne jamais toucher au widget
+                st.session_state["_pending_nouveau_bv"] = nom
                 st.rerun()
 
     if not bv_config:
