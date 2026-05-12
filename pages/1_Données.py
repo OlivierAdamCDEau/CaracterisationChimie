@@ -401,15 +401,19 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
             type=["json"], key="bv_cfg_upload",
         )
         if uploaded_cfg:
-            try:
-                loaded = json.loads(uploaded_cfg.read())
-                if isinstance(loaded, dict):
-                    st.session_state["_pending_load_bv"] = loaded
-                    st.rerun()
-                else:
-                    st.error("❌ Format JSON invalide (objet attendu).")
-            except Exception as ex:
-                st.error(f"❌ Erreur de lecture : {ex}")
+            # Guard : ne traiter que si pas déjà en attente (évite la boucle infinie)
+            if "_pending_load_bv" not in st.session_state:
+                try:
+                    loaded = json.loads(uploaded_cfg.read())
+                    if isinstance(loaded, dict):
+                        st.session_state["_pending_load_bv"] = loaded
+                        # Vider le file_uploader pour couper la boucle
+                        del st.session_state["bv_cfg_upload"]
+                        st.rerun()
+                    else:
+                        st.error("❌ Format JSON invalide (objet attendu).")
+                except Exception as ex:
+                    st.error(f"❌ Erreur de lecture : {ex}")
 
     if not bv_config:
         st.info("Aucun BV configuré. Créez-en un ci-dessus ou chargez une configuration.")

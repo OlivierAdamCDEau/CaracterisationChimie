@@ -39,10 +39,13 @@ fam_map = {k: str(v) for k, v in fam_map.items() if v is not None and str(v) not
 peut_configurer = verifier_droit("config")
 
 # ── Options (admin/collaborateur uniquement) ──────────────────────────────────
-n_vecteurs       = 10
-corpus_commun    = False
-seuil_imputation = 0.20
-methode_linkage  = "ward"
+n_vecteurs          = 10
+corpus_commun       = False
+seuil_imputation    = 0.20
+methode_linkage     = "ward"
+echelle_vecteur     = 1.0
+label_offset        = 0.06
+corr_labels_complets = False
 
 if peut_configurer:
     with st.expander("⚙️ Options", expanded=False):
@@ -55,6 +58,21 @@ if peut_configurer:
         methode_linkage  = c4.selectbox("Méthode clustering", ["ward","complete","average"],
             format_func=lambda x: {"ward":"Ward (défaut)","complete":"Complet","average":"Moyen"}[x])
 
+        st.markdown("**Biplot ACP — écartement des étiquettes**")
+        c5, c6, c7 = st.columns(3)
+        echelle_vecteur = c5.slider(
+            "Longueur des vecteurs", 0.5, 2.0, 1.0, 0.05,
+            help="Facteur d'échelle des flèches de loading. Réduire si les étiquettes débordent.",
+        )
+        label_offset = c6.slider(
+            "Écartement étiquettes", 0.03, 0.20, 0.06, 0.01,
+            help="Distance entre la pointe du vecteur et son étiquette. Augmenter si chevauchement.",
+        )
+        corr_labels_complets = c7.toggle(
+            "Libellés complets (heatmap corrélations)", False,
+            help="Affiche les libellés entiers plutôt que tronqués à 18 caractères.",
+        )
+
 # ── Calcul ────────────────────────────────────────────────────────────────────
 if st.button("🔬 Calculer les analyses multivariées", type="primary",
              use_container_width=True, disabled=(pivot_norm is None)):
@@ -65,12 +83,24 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
                 pivot_fam_norm=pivot_fam_norm,
                 fam_map=fam_map if fam_map else None,
                 lb_stations=lb_stations,
+                ordre_stations=st.session_state.get("ordre_stations"),
                 n_vecteurs=n_vecteurs,
+                echelle_vecteur=echelle_vecteur,
+                label_offset=label_offset,
                 corpus_commun=corpus_commun,
                 seuil_imputation=seuil_imputation,
                 methode_linkage=methode_linkage,
+                corr_labels_complets=corr_labels_complets,
             )
-            st.session_state["figs_m04"]    = figs
+            import io, matplotlib.pyplot as plt
+            figs_bytes = {}
+            for _nom, _fig in figs.items():
+                _buf = io.BytesIO()
+                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
+                _buf.seek(0)
+                figs_bytes[_nom] = _buf.read()
+                plt.close(_fig)
+            st.session_state["figs_m04"]    = figs_bytes
             st.session_state["m04_calcule"] = True
             for a in alertes:
                 (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
@@ -80,8 +110,8 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
             import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
-figs = st.session_state.get("figs_m04")
-if figs:
+figs_bytes = st.session_state.get("figs_m04")
+if figs_bytes:
     TITRES = {
         "biplot":     "Biplot ACP — paramètres individuels",
         "biplot_fam": "Double projection — familles",
@@ -89,16 +119,30 @@ if figs:
         "corr":       "Matrice de corrélations",
         "scree":      "Éboulis des valeurs propres",
     }
-    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, fig) in zip(tabs, figs.items()):
+    # Info couleurs stations (convention)
+    lb_stations_disp = st.session_state.get("lb_stations", {})
+    ordre_disp = st.session_state.get("ordre_stations") or list(lb_stations_disp.keys())
+    if lb_stations_disp:
+        PALETTE = ["#2563eb","#16a34a","#dc2626","#d97706",
+                   "#7c3aed","#0891b2","#be185d","#4d7c0f"]
+        legende_cols = st.columns(min(len(ordre_disp), 6))
+        for _i, _cd in enumerate(ordre_disp):
+            _lb = lb_stations_disp.get(_cd, _cd)
+            _col = PALETTE[_i % len(PALETTE)]
+            legende_cols[_i % len(legende_cols)].markdown(
+                f"<span style='display:inline-block;width:12px;height:12px;"
+                f"background:{_col};border-radius:50%;margin-right:5px;'></span>"
+                f"<small><b>{_lb}</b></small>",
+                unsafe_allow_html=True,
+            )
+        st.caption("Convention couleurs : chaque station a une couleur fixe (indice dans l'ordre du BV actif). Les vecteurs sont colorés par famille chimique si la configuration le permet.")
+
+    tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
+    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.pyplot(fig, use_container_width=True)
-            from modules.m08_export import exporter_figure
-            c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(fig,"png"),
-                f"m04_{nom}.png","image/png", key=f"png4_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(fig,"svg"),
-                f"m04_{nom}.svg","image/svg+xml", key=f"svg4_{nom}")
+            st.image(png_bytes, use_container_width=True)
+            st.download_button("⬇️ PNG", png_bytes,
+                f"m04_{nom}.png", "image/png", key=f"png4_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)

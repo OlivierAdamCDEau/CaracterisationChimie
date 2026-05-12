@@ -463,7 +463,16 @@ def boxplots_stations(
 
         ax.set_title(_titre_param(code, lb_map, unite_map), fontsize=8,
                      fontweight="bold", pad=4)
-        ax.set_xticks([])
+        # Noms des stations sur l'axe X (uniquement celles avec données)
+        _ticks_pos = [offset[k] for k, st in enumerate(stations)
+                      if not df_p[df_p["CdStation"] == st]["Valeur"].dropna().empty]
+        _ticks_lbl = [
+            (_nom_court_station(lb_stations.get(st, st), max_len=14) if lb_stations else str(st))
+            for k, st in enumerate(stations)
+            if not df_p[df_p["CdStation"] == st]["Valeur"].dropna().empty
+        ]
+        ax.set_xticks(_ticks_pos)
+        ax.set_xticklabels(_ticks_lbl, fontsize=6, rotation=35, ha="right")
         ax.set_xlim(-0.5, 0.5)
         ax.tick_params(axis="y", labelsize=7)
 

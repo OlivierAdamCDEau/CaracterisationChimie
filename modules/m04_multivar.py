@@ -319,6 +319,7 @@ def _placer_labels_biplot(
     couleurs: list[str],
     positions_points: list[tuple[float, float]] | None = None,
     fontsize: int = 8,
+    marge: float = 0.055,
 ) -> None:
     """
     Place les labels des vecteurs sans superposition, style QGIS :
@@ -341,7 +342,7 @@ def _placer_labels_biplot(
     # Emprise d'un label en unités data (approximation)
     lw = fontsize * 0.007 * rx
     lh = fontsize * 0.016 * ry
-    marge = 0.055   # décalage de base depuis la pointe (fraction de plage)
+    # marge : décalage de base depuis la pointe (fraction de plage) — passé en param
 
     # 8 positions candidates (angle, fraction_x, fraction_y)
     CANDIDATS = [
@@ -460,6 +461,7 @@ def biplot_acp(
     axe_y: int = 1,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    label_offset: float = 0.055,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Biplot stations / paramètres",
@@ -614,7 +616,7 @@ def biplot_acp(
     # --- Labels avec répulsion itérative ---
     _placer_labels_biplot(
         ax, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
-        fontsize=8,
+        fontsize=8, marge=label_offset,
     )
 
     # --- Légendes en dessous de la figure ---
@@ -984,6 +986,7 @@ def matrice_correlations(
     methode: str = "pearson",
     annot: bool = True,
     seuil_affichage: float = 0.0,
+    labels_complets: bool = False,
     titre: str = "Corrélations entre paramètres",
     figsize: tuple = (12, 10),
     dpi: int = 150,
@@ -1019,7 +1022,15 @@ def matrice_correlations(
 
     n = len(corr)
     codes = list(corr.columns)
-    labels = [_lb_court_avec_ref(c, lb_map) for c in codes]
+    if labels_complets:
+        # Libellés complets : figsize et rotation adaptés automatiquement
+        labels = [lb_map.get(code, str(code)) for code in codes]
+        max_len = max((len(l) for l in labels), default=10)
+        # Ajuster la taille de figure : plus large si libellés longs
+        extra = max(0, (max_len - 18) * 0.06)
+        figsize = (figsize[0] + extra, figsize[1] + extra * 0.6)
+    else:
+        labels = [_lb_court_avec_ref(c, lb_map) for c in codes]
 
     # Palette divergente bleu–blanc–rouge
     cmap = plt.cm.RdBu_r
@@ -1045,8 +1056,10 @@ def matrice_correlations(
     # Axes
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=max(7, min(9, 80 // n)))
-    ax.set_yticklabels(labels, fontsize=max(7, min(9, 80 // n)))
+    _rot = 60 if labels_complets else 45
+    _fs  = max(6, min(9, 80 // n))
+    ax.set_xticklabels(labels, rotation=_rot, ha="right", fontsize=_fs)
+    ax.set_yticklabels(labels, fontsize=_fs)
 
     # Colorbar
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -1146,11 +1159,13 @@ def figure_multivar_complete(
     lb_stations: Optional[dict] = None,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    label_offset: float = 0.055,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     n_clusters: int = 0,
     methode_linkage: str = "ward",
     methode_corr: str = "pearson",
+    corr_labels_complets: bool = False,
     titre_global: str = "Analyses multivariées — Chimie globale",
     dpi: int = 150,
 ) -> tuple[dict[str, plt.Figure], list]:
@@ -1184,6 +1199,7 @@ def figure_multivar_complete(
         fam_map=fam_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
+        label_offset=label_offset,
         corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
         titre=f"{titre_global} — Biplot", dpi=dpi,
     )
@@ -1218,6 +1234,7 @@ def figure_multivar_complete(
         pivot_norm, lb_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode=methode_corr,
+        labels_complets=corr_labels_complets,
         titre=f"{titre_global} — Corrélations ({methode_corr})", dpi=dpi,
     )
     figures["corr"] = fig

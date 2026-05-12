@@ -40,6 +40,7 @@ n_colonnes       = 4
 n_params_max     = 18
 afficher_lissage = True
 afficher_ic      = True
+params_choisis   = None   # None = tous
 
 if peut_configurer:
     with st.expander("⚙️ Options", expanded=False):
@@ -51,14 +52,48 @@ if peut_configurer:
         afficher_lissage = c4.toggle("Lissage séries", True)
         afficher_ic      = c5.toggle("Bande IC saisonnalité", True)
 
+        # Sélection des paramètres à analyser
+        if df_clean is not None and "CdParametre" in df_clean.columns:
+            params_dispo = sorted(df_clean["CdParametre"].dropna().unique().tolist())
+            lb_map_disp  = st.session_state.get("lb_map", {})
+            params_choisis_raw = st.multiselect(
+                "Paramètres à analyser (laisser vide = tous)",
+                options=params_dispo,
+                default=[],
+                format_func=lambda x: f"{lb_map_disp.get(x, x)} ({x})",
+                key="m05_params_sel",
+            )
+            params_choisis = params_choisis_raw if params_choisis_raw else None
+
+        # Sélection des stations à afficher
+        if df_clean is not None and "CdStationMesureEauxSurface" in df_clean.columns:
+            stations_dispo_m05 = sorted(df_clean["CdStationMesureEauxSurface"].dropna().unique().tolist())
+            lb_st_disp = st.session_state.get("lb_stations", {})
+            stations_choisies_raw = st.multiselect(
+                "Stations à afficher (laisser vide = toutes)",
+                options=stations_dispo_m05,
+                default=[],
+                format_func=lambda x: f"{lb_st_disp.get(x, x)} ({x})",
+                key="m05_stations_sel",
+            )
+            if stations_choisies_raw:
+                lb_stations = {k: v for k, v in lb_stations.items() if k in stations_choisies_raw}
+
 # ── Calcul ────────────────────────────────────────────────────────────────────
 if st.button("🔬 Calculer la variabilité temporelle", type="primary",
              use_container_width=True, disabled=(df_clean is None)):
     with st.spinner("Calcul en cours…"):
         try:
+            # Filtrer df_clean sur les stations sélectionnées si nécessaire
+            _df_calc = df_clean
+            if lb_stations and set(lb_stations.keys()) < set(df_clean["CdStationMesureEauxSurface"].unique()):
+                _df_calc = df_clean[df_clean["CdStationMesureEauxSurface"].isin(lb_stations.keys())]
+
             figs, alertes = figure_variabilite_complete(
-                df_clean, lb_map,
+                _df_calc, lb_map,
                 df_seuils=df_seuils,
+                params_selectionnes=params_choisis,
+                ordre_stations=st.session_state.get("ordre_stations"),
                 lb_stations=lb_stations,
                 statistique_saison=statistique,
                 n_colonnes=n_colonnes,
@@ -66,7 +101,15 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
                 afficher_lissage=afficher_lissage,
                 afficher_ic=afficher_ic,
             )
-            st.session_state["figs_m05"]    = figs
+            import io, matplotlib.pyplot as plt
+            figs_bytes = {}
+            for _nom, _fig in figs.items():
+                _buf = io.BytesIO()
+                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
+                _buf.seek(0)
+                figs_bytes[_nom] = _buf.read()
+                plt.close(_fig)
+            st.session_state["figs_m05"]    = figs_bytes
             st.session_state["m05_calcule"] = True
             for a in alertes:
                 (st.error if a.startswith("❌") else st.warning if a.startswith("⚠️") else st.info)(a)
@@ -76,40 +119,19 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
             import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
-figs = st.session_state.get("figs_m05")
-if figs:
+figs_bytes = st.session_state.get("figs_m05")
+if figs_bytes:
     TITRES = {
         "boxplots": "Distributions",
         "series":   "Séries temporelles",
         "saison":   "Profils saisonniers",
     }
-    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, fig) in zip(tabs, figs.items()):
+    tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
+    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.pyplot(fig, use_container_width=True)
-
-            # Légende stations sous la figure
-            lb_stations = st.session_state.get("lb_stations", {})
-            if lb_stations:
-                PALETTE = ["#2563eb","#16a34a","#dc2626","#d97706",
-                           "#7c3aed","#0891b2","#be185d","#4d7c0f"]
-                stations = list(lb_stations.items())
-                cols_leg = st.columns(min(len(stations), 4))
-                for i, (cd, lb) in enumerate(stations):
-                    couleur = PALETTE[i % len(PALETTE)]
-                    cols_leg[i % len(cols_leg)].markdown(
-                        f"<span style='display:inline-block;width:12px;height:12px;"
-                        f"background:{couleur};border-radius:2px;margin-right:6px;'></span>"
-                        f"<small>{lb.strip()}</small>",
-                        unsafe_allow_html=True,
-                    )
-
-            from modules.m08_export import exporter_figure
-            c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(fig,"png"),
-                f"m05_{nom}.png","image/png", key=f"png5_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(fig,"svg"),
-                f"m05_{nom}.svg","image/svg+xml", key=f"svg5_{nom}")
+            st.image(png_bytes, use_container_width=True)
+            st.download_button("⬇️ PNG", png_bytes,
+                f"m05_{nom}.png", "image/png", key=f"png5_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)
