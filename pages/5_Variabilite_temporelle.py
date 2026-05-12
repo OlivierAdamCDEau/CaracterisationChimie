@@ -49,8 +49,13 @@ if peut_configurer:
             format_func=lambda x: {"mediane":"Médiane","moyenne":"Moyenne"}[x])
         n_colonnes       = c2.slider("Colonnes", 2, 5, 4)
         n_params_max     = c3.slider("N paramètres max", 6, 30, 18)
-        afficher_lissage = c4.toggle("Lissage séries", True)
-        afficher_ic      = c5.toggle("Bande IC saisonnalité", True)
+        afficher_lissage    = c4.toggle("Lissage séries", True)
+        afficher_ic         = c5.toggle("Bande IC saisonnalité", True)
+        labels_complets_x   = st.toggle(
+            "Noms complets des stations sur l'axe X (boxplots)",
+            False,
+            help="Si activé, les noms de stations ne sont pas tronqués.",
+        )
 
         # Sélection des paramètres à analyser
         if df_clean is not None and "CdParametre" in df_clean.columns:
@@ -100,6 +105,7 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
                 n_params_max=n_params_max,
                 afficher_lissage=afficher_lissage,
                 afficher_ic=afficher_ic,
+                labels_complets_x=labels_complets_x,
             )
             import io, matplotlib.pyplot as plt
             figs_bytes = {}

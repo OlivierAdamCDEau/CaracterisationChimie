@@ -462,11 +462,12 @@ def biplot_acp(
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
     label_offset: float = 0.055,
+    labels_complets: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Biplot stations / paramètres",
-    figsize: tuple = (11, 9),
-    dpi: int = 150,
+    figsize: tuple = (9, 8),
+    dpi: int = 130,
 ) -> tuple[plt.Figure, list]:
     """
     Biplot ACP : projection des stations (points) et des paramètres (vecteurs).
@@ -562,15 +563,14 @@ def biplot_acp(
             linewidths=1.8 if est_impute else 0.6,
             marker="o",
         )
-        lb_st = _nom_court_station(lb_stations.get(station, station)) if lb_stations else str(station)
+        if labels_complets:
+            lb_st = lb_stations.get(station, station) if lb_stations else str(station)
+        else:
+            lb_st = _nom_court_station(lb_stations.get(station, station)) if lb_stations else str(station)
         # Suffixe taux si imputation notable
         label_st = f"{lb_st} ({taux_st:.0%}*)" if est_impute else lb_st
-        ax.annotate(
-            label_st, (s_x[i], s_y[i]),
-            textcoords="offset points", xytext=(6, 5),
-            fontsize=8, color=_couleur_station(i), fontweight="bold", zorder=6,
-        )
-        pts_stations.append((s_x[i], s_y[i]))
+        # Stocker label/couleur pour placement anti-collision (même algo que vecteurs)
+        pts_stations.append((s_x[i], s_y[i], label_st, _couleur_station(i)))
 
     # --- Vecteurs paramètres (loadings) : flèches d'abord ---
     vecteurs_xy = []
@@ -613,10 +613,22 @@ def biplot_acp(
     # Forcer le rendu pour que get_xlim/ylim soient stables avant la répulsion
     fig.canvas.draw()
 
-    # --- Labels avec répulsion itérative ---
+    # --- Labels avec répulsion itérative — vecteurs paramètres ---
+    pts_xy = [(x, y) for x, y, _, _ in pts_stations]
     _placer_labels_biplot(
         ax, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
+        positions_points=pts_xy,
         fontsize=8, marge=label_offset,
+    )
+
+    # --- Labels stations avec répulsion (même algorithme) ---
+    _placer_labels_biplot(
+        ax,
+        positions_vecteurs=pts_xy,
+        labels=[lbl for _, _, lbl, _ in pts_stations],
+        couleurs=[col for _, _, _, col in pts_stations],
+        positions_points=list(vecteurs_xy),   # éviter collision avec flèches
+        fontsize=9, marge=label_offset * 1.2,
     )
 
     # --- Légendes en dessous de la figure ---
@@ -824,7 +836,8 @@ def biplot_double_projection(
                        list(df_ind.columns), lb_map, idx_top_ind, load_ind,
                        0, 1, var_ind, list(df_ind.index), scale_ind,
                        avec_ref=True, avec_familles=use_familles,
-                       taux_imputation=taux_imp_ind, seuil_imputation=seuil_imputation)
+                       taux_imputation=taux_imp_ind, seuil_imputation=seuil_imputation,
+                       labels_complets_=labels_complets)
         axes[0].set_title("Paramètres individuels", fontsize=9, fontweight="bold")
 
     # --- Panneau droit : familles SANDRE ---
@@ -845,7 +858,8 @@ def biplot_double_projection(
                        list(df_fam.columns), lb_fam, idx_top_fam, load_fam,
                        0, 1, var_fam, list(df_fam.index), scale_fam,
                        avec_ref=False, avec_familles=False,
-                       taux_imputation={}, seuil_imputation=seuil_imputation)
+                       taux_imputation={}, seuil_imputation=seuil_imputation,
+                       labels_complets_=labels_complets)
         axes[1].set_title("Familles SANDRE", fontsize=9, fontweight="bold")
 
     # Légende familles uniquement dans le panneau dédié (stations lisibles sur la figure)
@@ -882,6 +896,7 @@ def dendrogramme_stations(
     methode_linkage: str = "ward",
     metric: str = "euclidean",
     n_clusters: int = 0,
+    corpus_commun: bool = False,
     titre: str = "Clustering hiérarchique des stations",
     figsize: tuple = (10, 6),
     dpi: int = 150,
@@ -906,7 +921,7 @@ def dendrogramme_stations(
     alertes = []
     dict_clusters = None
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_stations=3)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_stations=3, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes, None
@@ -963,10 +978,37 @@ def dendrogramme_stations(
             xytext=(2, 4), textcoords="offset points",
             fontsize=8, color="#cc3333",
         )
-        alertes.append(
-            f"ℹ️ Clustering : {n_clusters} groupes — "
-            + ", ".join(f"{s}→G{c}" for s, c in dict_clusters.items())
+        # Résumé des groupes
+        groupes = {}
+        for s, g in dict_clusters.items():
+            lb = _nom_court_station(lb_stations.get(s, s)) if lb_stations else str(s)
+            groupes.setdefault(g, []).append(lb)
+        resume = " | ".join(
+            f"G{g}: {', '.join(ss)}" for g, ss in sorted(groupes.items())
         )
+        alertes.append(f"ℹ️ Clustering ({methode_linkage}) : {n_clusters} groupes — {resume}")
+
+    # Interprétation automatique des distances
+    if len(Z) >= 2:
+        h_max  = Z[-1, 2]
+        h_last = Z[-2, 2]
+        saut   = h_max - h_last
+        pct    = saut / h_max * 100 if h_max > 0 else 0
+        if pct > 30:
+            alertes.append(
+                f"ℹ️ Dendrogramme : saut important à la dernière fusion "
+                f"(+{pct:.0f}% de la hauteur max) → suggère {2} groupes naturels distincts."
+            )
+        elif pct > 15:
+            alertes.append(
+                f"ℹ️ Dendrogramme : saut modéré à la dernière fusion "
+                f"(+{pct:.0f}%) → {2} groupes possibles, mais proximité notable entre certaines stations."
+            )
+        else:
+            alertes.append(
+                "ℹ️ Dendrogramme : pas de saut marqué entre fusions "
+                "→ continuum de similarité, pas de groupement naturel évident."
+            )
 
     _ajouter_watermark(fig, ax=ax)
     fig.tight_layout()
@@ -987,6 +1029,7 @@ def matrice_correlations(
     annot: bool = True,
     seuil_affichage: float = 0.0,
     labels_complets: bool = False,
+    corpus_commun: bool = False,
     titre: str = "Corrélations entre paramètres",
     figsize: tuple = (12, 10),
     dpi: int = 150,
@@ -1009,7 +1052,7 @@ def matrice_correlations(
     """
     alertes = []
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_params=3)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_params=3, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes
@@ -1022,13 +1065,14 @@ def matrice_correlations(
 
     n = len(corr)
     codes = list(corr.columns)
+    # Taille adaptée au nombre de paramètres (min 8×8, max 20×20)
+    base = max(8, min(20, n * 0.55))
+    figsize = (base, base)
     if labels_complets:
-        # Libellés complets : figsize et rotation adaptés automatiquement
         labels = [lb_map.get(code, str(code)) for code in codes]
         max_len = max((len(l) for l in labels), default=10)
-        # Ajuster la taille de figure : plus large si libellés longs
-        extra = max(0, (max_len - 18) * 0.06)
-        figsize = (figsize[0] + extra, figsize[1] + extra * 0.6)
+        extra = max(0, (max_len - 18) * 0.05)
+        figsize = (figsize[0] + extra, figsize[1] + extra * 0.7)
     else:
         labels = [_lb_court_avec_ref(c, lb_map) for c in codes]
 
@@ -1089,6 +1133,7 @@ def scree_plot(
     ordre_stations: Optional[list] = None,
     lb_stations: Optional[dict] = None,
     n_composantes: int = 10,
+    corpus_commun: bool = False,
     titre: str = "Éboulis des valeurs propres (Scree plot)",
     figsize: tuple = (8, 5),
     dpi: int = 150,
@@ -1100,7 +1145,7 @@ def scree_plot(
     """
     alertes = []
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes
@@ -1113,6 +1158,7 @@ def scree_plot(
     cum_var = np.cumsum(var)
     comp_labels = [f"PC{i + 1}" for i in range(n_comp)]
 
+    figsize = (max(7, min(14, n_comp * 0.9 + 2)), 5)
     fig, ax1 = plt.subplots(figsize=figsize, dpi=dpi)
     ax2 = ax1.twinx()
 
@@ -1200,6 +1246,7 @@ def figure_multivar_complete(
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
         label_offset=label_offset,
+        labels_complets=corr_labels_complets,
         corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
         titre=f"{titre_global} — Biplot", dpi=dpi,
     )
@@ -1213,6 +1260,7 @@ def figure_multivar_complete(
             fam_map=fam_map,
             ordre_stations=ordre_stations, lb_stations=lb_stations,
             n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
+            labels_complets=corr_labels_complets,
             corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
             titre=f"{titre_global} — Double projection", dpi=dpi,
         )
@@ -1224,6 +1272,7 @@ def figure_multivar_complete(
         pivot_norm,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode_linkage=methode_linkage, n_clusters=n_clusters,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Clustering", dpi=dpi,
     )
     figures["dendro"] = fig
@@ -1235,6 +1284,7 @@ def figure_multivar_complete(
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode=methode_corr,
         labels_complets=corr_labels_complets,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Corrélations ({methode_corr})", dpi=dpi,
     )
     figures["corr"] = fig
@@ -1244,6 +1294,7 @@ def figure_multivar_complete(
     fig, msgs = scree_plot(
         pivot_norm,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Éboulis des valeurs propres", dpi=dpi,
     )
     figures["scree"] = fig

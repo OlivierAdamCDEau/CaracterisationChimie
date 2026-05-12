@@ -358,7 +358,11 @@ def _legende_seuils() -> list:
 
 def _legende_commune(fig, stations: list, lb_stations: Optional[dict],
                      avec_seuils: bool = False):
-    """Trace la légende commune stations (+ seuils si demandé) en bas de figure."""
+    """Trace la légende commune stations (+ seuils si demandé) sous la figure.
+
+    La légende est placée sous l'axe X, sans masquer les étiquettes :
+    on utilise un anchor négatif et on ajuste la marge basse via subplots_adjust.
+    """
     patches_st = [
         mpatches.Patch(
             color=_couleur_station(k),
@@ -367,14 +371,22 @@ def _legende_commune(fig, stations: list, lb_stations: Optional[dict],
         for k, s in enumerate(stations)
     ]
     handles = patches_st + (_legende_seuils() if avec_seuils else [])
-    ncol = min(len(handles), 8)
+    ncol    = min(len(handles), 6)
+    n_rows  = -(-len(handles) // ncol)   # ceil div
     titre_leg = "Stations & seuils de qualité" if avec_seuils else "Stations"
+
+    # Ancrage sous la figure — espace proportionnel au nombre de lignes
+    anchor_y  = -(0.06 + 0.045 * n_rows)
     fig.legend(
-        handles=handles, fontsize=7, loc="lower center",
-        ncol=ncol, framealpha=0.85,
-        bbox_to_anchor=(0.5, -0.04),
+        handles=handles, fontsize=7, loc="upper center",
+        ncol=ncol, framealpha=0.88,
+        bbox_to_anchor=(0.5, anchor_y),
+        bbox_transform=fig.transFigure,
         title=titre_leg, title_fontsize=7,
     )
+    # Réserver la marge basse pour la légende (tight_layout ne le fait pas)
+    bottom_margin = 0.10 + 0.055 * n_rows
+    fig.subplots_adjust(bottom=min(bottom_margin, 0.35))
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +403,7 @@ def boxplots_stations(
     lb_stations: Optional[dict] = None,
     n_params_max: int = 30,
     n_colonnes: int = 4,
+    labels_complets_x: bool = False,
     titre: str = "Distribution des concentrations par station",
     figsize: Optional[tuple] = None,
     dpi: int = 150,
@@ -466,13 +479,15 @@ def boxplots_stations(
         # Noms des stations sur l'axe X (uniquement celles avec données)
         _ticks_pos = [offset[k] for k, st in enumerate(stations)
                       if not df_p[df_p["CdStation"] == st]["Valeur"].dropna().empty]
+        _max_len = 999 if labels_complets_x else 14
         _ticks_lbl = [
-            (_nom_court_station(lb_stations.get(st, st), max_len=14) if lb_stations else str(st))
+            (_nom_court_station(lb_stations.get(st, st), max_len=_max_len) if lb_stations else str(st))
             for k, st in enumerate(stations)
             if not df_p[df_p["CdStation"] == st]["Valeur"].dropna().empty
         ]
+        _rot = 55 if labels_complets_x else 35
         ax.set_xticks(_ticks_pos)
-        ax.set_xticklabels(_ticks_lbl, fontsize=6, rotation=35, ha="right")
+        ax.set_xticklabels(_ticks_lbl, fontsize=6, rotation=_rot, ha="right")
         ax.set_xlim(-0.5, 0.5)
         ax.tick_params(axis="y", labelsize=7)
 
@@ -488,9 +503,9 @@ def boxplots_stations(
         row_i, col_i = divmod(idx, n_col)
         axes[row_i][col_i].set_visible(False)
 
-    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
     fig.suptitle(titre, fontsize=10, fontweight="bold", y=1.01)
     fig.tight_layout()
+    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
 
     alertes.append(f"ℹ️ Boxplots : {n_p} paramètre(s) × {n_st} station(s).")
     return fig, alertes
@@ -595,9 +610,9 @@ def series_temporelles(
         row_i, col_i = divmod(idx, n_col)
         axes[row_i][col_i].set_visible(False)
 
-    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
     fig.suptitle(titre, fontsize=10, fontweight="bold", y=1.01)
     fig.tight_layout()
+    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
 
     alertes.append(f"ℹ️ Séries temporelles : {n_p} paramètre(s) × {len(stations)} station(s).")
     return fig, alertes
@@ -727,10 +742,10 @@ def saisonnalite_stations(
         f"{n_p} paramètre(s) × {len(stations)} station(s)."
     )
 
-    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
     fig.suptitle(f"{titre}  ({statistique}{note_ic})",
                  fontsize=10, fontweight="bold", y=1.01)
     fig.tight_layout()
+    _legende_commune(fig, stations, lb_stations, avec_seuils=(df_seuils is not None))
 
     return fig, alertes
 
@@ -752,6 +767,7 @@ def figure_variabilite_complete(
     n_params_max: int = 18,
     afficher_lissage: bool = True,
     afficher_ic: bool = True,
+    labels_complets_x: bool = False,
     titre_global: str = "Variabilité temporelle — Chimie globale",
     dpi: int = 150,
 ) -> tuple[dict[str, plt.Figure], list]:
@@ -776,6 +792,7 @@ def figure_variabilite_complete(
         params_selectionnes=params_selectionnes,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_params_max=n_params_max, n_colonnes=n_colonnes,
+        labels_complets_x=labels_complets_x,
         titre=f"{titre_global} — Distributions", dpi=dpi,
     )
     figures["boxplots"] = fig
