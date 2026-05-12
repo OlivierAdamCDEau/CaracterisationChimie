@@ -35,7 +35,10 @@ afficher_bandeau_utilisateur()
 
 st.title("📂 Données")
 emoji, msg = statut_donnees()
-afficher_bandeau_statut(emoji, msg)
+# Sur l'onglet Données, n'afficher le bandeau que si les données sont chargées
+# (évite le bandeau rouge permanent avant tout chargement, qui est confusant)
+if emoji == "✅":
+    afficher_bandeau_statut(emoji, msg)
 
 try:
     from modules.m01_import import (
@@ -509,17 +512,9 @@ st.markdown("---")
 if st.button("🚀 Appliquer les filtres et charger", type="primary", use_container_width=True):
     with st.spinner("Filtrage et analyse en cours…"):
         try:
-            # Relire et fusionner (déjà en cache)
-            resultats = []
-            for nom, data in files_data:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb") as tmp:
-                    tmp.write(data); tmp_path = tmp.name
-                fmt = format_forces.get(nom) or None
-                df_src, _ = lire_bdd_source(tmp_path, format_force=fmt)
-                os.unlink(tmp_path)
-                resultats.append((df_src, nom))
-
-            df_fus, _ = fusionner_sources(resultats)
+            # Utiliser df_brut déjà en cache — évite de relire les fichiers
+            # (critique pour les grosses BDD : évite le timeout Streamlit Cloud)
+            df_fus = df_brut
 
             # Extraire débit (Naïades uniquement)
             df_debit, a_deb = extraire_debit(df_fus)
