@@ -275,6 +275,71 @@ with col2:
     )
 
 # ── Étape 5 : Groupement par Bassin Versant ───────────────────────────────────
+
+# ══ Traitement des actions BV en attente ══════════════════════════════════════
+# RÈGLE STREAMLIT : on ne peut pas modifier session_state[clé] quand cette clé
+# est liée à un widget affiché. Toutes les mutations sont donc appliquées ici,
+# au niveau racine de la page, AVANT que les widgets soient dessinés.
+# ══════════════════════════════════════════════════════════════════════════════
+if "bv_config" not in st.session_state:
+    st.session_state["bv_config"] = {}
+
+_bv_changed = False
+
+# Création d'un nouveau BV
+if st.session_state.get("_pending_nouveau_bv"):
+    _nom = st.session_state.pop("_pending_nouveau_bv")
+    if _nom and _nom not in st.session_state["bv_config"]:
+        st.session_state["bv_config"][_nom] = []
+    _bv_changed = True
+
+# Ajout de stations à un BV
+for _k, _v in list(st.session_state.items()):
+    if _k.startswith("_pending_add_") and _v:
+        _bv_name = _k[len("_pending_add_"):]
+        _current = st.session_state["bv_config"].get(_bv_name, [])
+        st.session_state["bv_config"][_bv_name] = _current + [
+            s for s in _v if s not in _current
+        ]
+        st.session_state.pop(_k)
+        _bv_changed = True
+
+# Suppression d'un BV
+if st.session_state.get("_pending_del_bv"):
+    _nom = st.session_state.pop("_pending_del_bv")
+    st.session_state["bv_config"].pop(_nom, None)
+    _bv_changed = True
+
+# Montée d'une station
+if st.session_state.get("_pending_up"):
+    _bv_name, _i = st.session_state.pop("_pending_up")
+    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
+    if _i > 0:
+        _lst[_i-1], _lst[_i] = _lst[_i], _lst[_i-1]
+    st.session_state["bv_config"][_bv_name] = _lst
+    _bv_changed = True
+
+# Descente d'une station
+if st.session_state.get("_pending_dn"):
+    _bv_name, _i = st.session_state.pop("_pending_dn")
+    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
+    if _i < len(_lst) - 1:
+        _lst[_i], _lst[_i+1] = _lst[_i+1], _lst[_i]
+    st.session_state["bv_config"][_bv_name] = _lst
+    _bv_changed = True
+
+# Retrait d'une station
+if st.session_state.get("_pending_rm"):
+    _bv_name, _i = st.session_state.pop("_pending_rm")
+    _lst = list(st.session_state["bv_config"].get(_bv_name, []))
+    if 0 <= _i < len(_lst):
+        _lst.pop(_i)
+    st.session_state["bv_config"][_bv_name] = _lst
+    _bv_changed = True
+
+if _bv_changed:
+    st.rerun()
+
 st.markdown("### 5. Groupement par Bassin Versant *(optionnel)*")
 
 with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
@@ -283,18 +348,7 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
         "L'ordre des stations sera respecté dans les graphiques et tableaux."
     )
 
-    if "bv_config" not in st.session_state:
-        st.session_state["bv_config"] = {}
     bv_config: dict = st.session_state["bv_config"]
-
-    # Appliquer la création de BV en attente (issue du run précédent)
-    # AVANT de dessiner les widgets, pour éviter le conflit session_state/widget
-    if st.session_state.get("_pending_nouveau_bv"):
-        nom_a_creer = st.session_state.pop("_pending_nouveau_bv")
-        if nom_a_creer and nom_a_creer not in bv_config:
-            bv_config[nom_a_creer] = []
-            st.session_state["bv_config"] = bv_config
-        st.rerun()
 
     col_add1, col_add2 = st.columns([3, 1])
     with col_add1:
@@ -312,7 +366,6 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
             elif nom in bv_config:
                 st.warning(f"⚠️ Le BV « {nom} » existe déjà.")
             else:
-                # Stocker dans clé intermédiaire, ne jamais toucher au widget
                 st.session_state["_pending_nouveau_bv"] = nom
                 st.rerun()
 
@@ -336,19 +389,6 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                 non_assignees = [s for s in stations_pool if s not in stations_bv]
                 # Clé du widget multiselect (NE JAMAIS écrire dessus directement)
                 key_ms = f"add_ms_{nom_bv}"
-                # Clé intermédiaire : stocke la sélection validée par le bouton
-                key_pending = f"_pending_{nom_bv}"
-
-                # Si une sélection en attente existe (bouton cliqué au run précédent),
-                # on l'applique maintenant — AVANT de dessiner le widget
-                if st.session_state.get(key_pending):
-                    pending = st.session_state.pop(key_pending)
-                    bv_config[nom_bv] = stations_bv + [
-                        s for s in pending if s not in stations_bv
-                    ]
-                    st.session_state["bv_config"] = bv_config
-                    st.rerun()
-
                 st.multiselect(
                     f"Sélectionner les stations à ajouter au BV « {nom_bv} »",
                     options=non_assignees,
@@ -360,8 +400,7 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                              key=f"add_btn_{nom_bv}", use_container_width=True):
                     selections = st.session_state.get(key_ms, [])
                     if selections:
-                        # On stocke dans la clé intermédiaire, pas dans le widget
-                        st.session_state[key_pending] = list(selections)
+                        st.session_state[f"_pending_add_{nom_bv}"] = list(selections)
                         st.rerun()
                     else:
                         st.warning("⚠️ Sélectionnez au moins une station.")
@@ -373,32 +412,20 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                     for i, s in enumerate(list(stations_bv)):
                         c1, c2, c3, c4 = st.columns([7, 1, 1, 1])
                         c1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
-                        # Bouton ↑ : seulement si pas en première position
                         if i > 0:
                             if c2.button("↑", key=f"up_{nom_bv}_{i}", help="Monter"):
-                                lst = list(bv_config[nom_bv])
-                                lst[i-1], lst[i] = lst[i], lst[i-1]
-                                bv_config[nom_bv] = lst
-                                st.session_state["bv_config"] = bv_config
+                                st.session_state["_pending_up"] = (nom_bv, i)
                                 st.rerun()
                         else:
                             c2.empty()
-                        # Bouton ↓ : seulement si pas en dernière position
                         if i < len(stations_bv) - 1:
                             if c3.button("↓", key=f"dn_{nom_bv}_{i}", help="Descendre"):
-                                lst = list(bv_config[nom_bv])
-                                lst[i], lst[i+1] = lst[i+1], lst[i]
-                                bv_config[nom_bv] = lst
-                                st.session_state["bv_config"] = bv_config
+                                st.session_state["_pending_dn"] = (nom_bv, i)
                                 st.rerun()
                         else:
                             c3.empty()
-                        # Bouton ✖ : toujours disponible
                         if c4.button("✖", key=f"rm_{nom_bv}_{i}", help="Retirer du BV"):
-                            lst = list(bv_config[nom_bv])
-                            lst.pop(i)
-                            bv_config[nom_bv] = lst
-                            st.session_state["bv_config"] = bv_config
+                            st.session_state["_pending_rm"] = (nom_bv, i)
                             st.rerun()
                 else:
                     st.caption("Aucune station assignée.")
@@ -406,8 +433,7 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
             with col_bv2:
                 st.markdown("<br><br>", unsafe_allow_html=True)
                 if st.button(f"🗑️ Supprimer\n« {nom_bv} »", key=f"del_{nom_bv}", use_container_width=True):
-                    del bv_config[nom_bv]
-                    st.session_state["bv_config"] = bv_config
+                    st.session_state["_pending_del_bv"] = nom_bv
                     st.rerun()
 
         st.markdown("---")
