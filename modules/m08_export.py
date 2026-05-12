@@ -882,14 +882,18 @@ def generer_rapport_pdf(
         # Figures — résolution 250 dpi
         for fig in figures_sec:
             img_buf = io.BytesIO()
-            fig.savefig(img_buf, format="png", dpi=250, bbox_inches="tight")
+            if isinstance(fig, (bytes, bytearray)):
+                img_buf.write(bytes(fig))
+                # Dimensions inconnues pour bytes PNG — utiliser 100% de la largeur utile
+                img_w = w_utile
+                img_h = w_utile * 0.75   # ratio 4:3 par défaut
+            else:
+                fig.savefig(img_buf, format="png", dpi=250, bbox_inches="tight")
+                fig_w_in, fig_h_in = fig.get_size_inches()
+                ratio_fig = fig_h_in / fig_w_in
+                img_w = w_utile
+                img_h = min(img_w * ratio_fig, w_utile * h_ratio)
             img_buf.seek(0)
-
-            # Récupérer les dimensions réelles de la figure pour respecter le ratio
-            fig_w_in, fig_h_in = fig.get_size_inches()
-            ratio_fig = fig_h_in / fig_w_in
-            img_w = w_utile
-            img_h = min(img_w * ratio_fig, w_utile * h_ratio)
 
             rl_img = RLImage(img_buf, width=img_w, height=img_h)
             story.append(rl_img)

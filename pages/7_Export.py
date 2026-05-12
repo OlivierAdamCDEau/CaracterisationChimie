@@ -49,10 +49,17 @@ if toutes_figs:
     for nom, fig in toutes_figs.items():
         c1, c2, c3 = st.columns([3, 1, 1])
         c1.markdown(f"📊 `{nom}`")
-        c2.download_button("PNG", exporter_figure(fig, "png", dpi=200),
+        # Toutes les figures sont stockées en bytes PNG depuis la v4
+        png_data = exporter_figure(fig, "png", dpi=200)
+        c2.download_button("⬇️ PNG", png_data,
             f"{nom}.png", "image/png", key=f"png_{nom}")
-        c3.download_button("SVG", exporter_figure(fig, "svg"),
-            f"{nom}.svg", "image/svg+xml", key=f"svg_{nom}")
+        # SVG uniquement si objet matplotlib (pas bytes)
+        if not isinstance(fig, (bytes, bytearray)):
+            svg_data = exporter_figure(fig, "svg")
+            c3.download_button("⬇️ SVG", svg_data,
+                f"{nom}.svg", "image/svg+xml", key=f"svg_{nom}")
+        else:
+            c3.caption("SVG N/A")
 else:
     st.info("Aucune figure générée. Calculez au moins un module d'analyse.")
 

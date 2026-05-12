@@ -704,11 +704,12 @@ def biplot_double_projection(
     lb_stations: Optional[dict] = None,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    labels_complets: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Double projection (paramètres & familles SANDRE)",
-    figsize: tuple = (16, 7),
-    dpi: int = 150,
+    figsize: tuple = (12, 7),
+    dpi: int = 130,
 ) -> tuple[plt.Figure, list]:
     """
     Figure côte-à-côte : biplot individuel (gauche) + biplot familles (droite).
@@ -728,6 +729,7 @@ def biplot_double_projection(
         return biplot_acp(
             pivot_norm, lb_map,
             fam_map=fam_map,
+            labels_complets=labels_complets,
             ordre_stations=ordre_stations, lb_stations=lb_stations,
             n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
             corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
@@ -841,7 +843,7 @@ def biplot_double_projection(
         axes[0].set_title("Paramètres individuels", fontsize=9, fontweight="bold")
 
     # --- Panneau droit : familles SANDRE ---
-    df_fam, msgs, _ = _prepare_pivot(pivot_fam_norm, ordre_stations, lb_stations)
+    df_fam, msgs, _ = _prepare_pivot(pivot_fam_norm, ordre_stations, lb_stations, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if not df_fam.empty:
         pca_fam, scores_fam, msgs = _calculer_acp(df_fam)
@@ -1009,6 +1011,74 @@ def dendrogramme_stations(
                 "ℹ️ Dendrogramme : pas de saut marqué entre fusions "
                 "→ continuum de similarité, pas de groupement naturel évident."
             )
+
+    # ── Panneau texte et légende couleurs des clusters ───────────────────────
+    txt_lines = []
+
+    # Interprétation du saut de distance
+    if len(Z) >= 2:
+        h_max  = Z[-1, 2]
+        h_last = Z[-2, 2]
+        pct    = (h_max - h_last) / max(h_max, 1e-9) * 100
+        if pct > 30:
+            txt_lines.append(
+                "Saut important a la derniere fusion (+{:.0f}% de la hauteur max) "
+                "-> 2 groupes naturels distincts.".format(pct)
+            )
+        elif pct > 15:
+            txt_lines.append(
+                "Saut modere a la derniere fusion (+{:.0f}%) "
+                "-> groupes possibles, mais proximite notable.".format(pct)
+            )
+        else:
+            txt_lines.append(
+                "Pas de saut marque -> continuum de similarite, "
+                "pas de groupement naturel evident."
+            )
+        txt_lines.append(
+            "Distance max ({}/{}) = {:.2f}".format(methode_linkage, metric, h_max)
+            + " - plus la valeur est elevee, plus les stations sont differentes."
+        )
+
+    # Legende coloree des groupes si n_clusters > 1
+    if dict_clusters:
+        groupes = {}
+        for s, g in dict_clusters.items():
+            lb = _nom_court_station(lb_stations.get(s, s)) if lb_stations else str(s)
+            groupes.setdefault(g, []).append(lb)
+
+        PALETTE_CLUST = [
+            "#2563eb", "#16a34a", "#dc2626", "#d97706",
+            "#7c3aed", "#0891b2", "#be185d", "#4d7c0f",
+        ]
+        txt_lines.append("")
+        txt_lines.append("Composition des {} groupe(s) :".format(len(groupes)))
+        for g_id, membres in sorted(groupes.items()):
+            txt_lines.append("  G{} : {}".format(g_id, ", ".join(membres)))
+
+        handles_g = [
+            mpatches.Patch(
+                facecolor=PALETTE_CLUST[(g - 1) % len(PALETTE_CLUST)],
+                label="G{} : {}".format(g, ", ".join(noms)),
+            )
+            for g, noms in sorted(groupes.items())
+        ]
+        ax.legend(
+            handles=handles_g, loc="upper right",
+            fontsize=7, title="Groupes", title_fontsize=7,
+            framealpha=0.88,
+        )
+
+    if txt_lines:
+        fig.text(
+            0.01, 0.01,
+            "\n".join(txt_lines),
+            fontsize=7, color="#374151", va="bottom", ha="left",
+            transform=fig.transFigure,
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="#f0f7ff",
+                      edgecolor="#bfdbfe", alpha=0.9),
+        )
+        fig.subplots_adjust(bottom=0.06 + 0.022 * len(txt_lines))
 
     _ajouter_watermark(fig, ax=ax)
     fig.tight_layout()
