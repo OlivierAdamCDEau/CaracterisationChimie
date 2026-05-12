@@ -325,7 +325,21 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                 # les options changent entre deux reruns.
                 # Pattern correct : multiselect + bouton "Ajouter" séparé.
                 non_assignees = [s for s in stations_pool if s not in stations_bv]
+                # Clé du widget multiselect (NE JAMAIS écrire dessus directement)
                 key_ms = f"add_ms_{nom_bv}"
+                # Clé intermédiaire : stocke la sélection validée par le bouton
+                key_pending = f"_pending_{nom_bv}"
+
+                # Si une sélection en attente existe (bouton cliqué au run précédent),
+                # on l'applique maintenant — AVANT de dessiner le widget
+                if st.session_state.get(key_pending):
+                    pending = st.session_state.pop(key_pending)
+                    bv_config[nom_bv] = stations_bv + [
+                        s for s in pending if s not in stations_bv
+                    ]
+                    st.session_state["bv_config"] = bv_config
+                    st.rerun()
+
                 st.multiselect(
                     f"Sélectionner les stations à ajouter au BV « {nom_bv} »",
                     options=non_assignees,
@@ -337,12 +351,8 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                              key=f"add_btn_{nom_bv}", use_container_width=True):
                     selections = st.session_state.get(key_ms, [])
                     if selections:
-                        bv_config[nom_bv] = stations_bv + [
-                            s for s in selections if s not in stations_bv
-                        ]
-                        st.session_state["bv_config"] = bv_config
-                        # Vider le multiselect avant le rerun pour éviter le conflit
-                        st.session_state[key_ms] = []
+                        # On stocke dans la clé intermédiaire, pas dans le widget
+                        st.session_state[key_pending] = list(selections)
                         st.rerun()
                     else:
                         st.warning("⚠️ Sélectionnez au moins une station.")
