@@ -312,12 +312,6 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
     else:
         stations_pool = stations_selectionnees if stations_selectionnees else stations_dispo
 
-        try:
-            from streamlit_sortables import sort_items
-            _use_dnd = True
-        except ImportError:
-            _use_dnd = False
-
         for nom_bv in list(bv_config.keys()):
             st.markdown(f"---\n#### 🗂️ BV : *{nom_bv}*")
             col_bv1, col_bv2 = st.columns([4, 1])
@@ -355,37 +349,38 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
 
                 # ── Liste des stations déjà dans le BV ───────────────────
                 if stations_bv:
-                    st.markdown(f"**Stations dans ce BV** ({len(stations_bv)}) :")
-                    if _use_dnd:
-                        labels = [f"{lb_dispo.get(s, s)} ({s})" for s in stations_bv]
-                        sorted_labels = sort_items(labels, key=f"sort_{nom_bv}")
-                        lbl2code = {f"{lb_dispo.get(s, s)} ({s})": s for s in stations_bv}
-                        new_order = [lbl2code[l] for l in sorted_labels if l in lbl2code]
-                        if new_order != stations_bv:
-                            bv_config[nom_bv] = new_order
-                            st.session_state["bv_config"] = bv_config
-                    else:
-                        for i, s in enumerate(list(stations_bv)):
-                            c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
-                            c1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
-                            if i > 0 and c2.button("↑", key=f"up_{nom_bv}_{i}"):
+                    st.markdown(f"**Stations dans ce BV** ({len(stations_bv)}) — "
+                                "↑ / ↓ pour réordonner, ✖ pour retirer :")
+                    for i, s in enumerate(list(stations_bv)):
+                        c1, c2, c3, c4 = st.columns([7, 1, 1, 1])
+                        c1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
+                        # Bouton ↑ : seulement si pas en première position
+                        if i > 0:
+                            if c2.button("↑", key=f"up_{nom_bv}_{i}", help="Monter"):
                                 lst = list(bv_config[nom_bv])
                                 lst[i-1], lst[i] = lst[i], lst[i-1]
                                 bv_config[nom_bv] = lst
                                 st.session_state["bv_config"] = bv_config
                                 st.rerun()
-                            if i < len(stations_bv)-1 and c3.button("↓", key=f"dn_{nom_bv}_{i}"):
+                        else:
+                            c2.empty()
+                        # Bouton ↓ : seulement si pas en dernière position
+                        if i < len(stations_bv) - 1:
+                            if c3.button("↓", key=f"dn_{nom_bv}_{i}", help="Descendre"):
                                 lst = list(bv_config[nom_bv])
                                 lst[i], lst[i+1] = lst[i+1], lst[i]
                                 bv_config[nom_bv] = lst
                                 st.session_state["bv_config"] = bv_config
                                 st.rerun()
-                            if c4.button("✖", key=f"rm_{nom_bv}_{i}"):
-                                lst = list(bv_config[nom_bv])
-                                lst.pop(i)
-                                bv_config[nom_bv] = lst
-                                st.session_state["bv_config"] = bv_config
-                                st.rerun()
+                        else:
+                            c3.empty()
+                        # Bouton ✖ : toujours disponible
+                        if c4.button("✖", key=f"rm_{nom_bv}_{i}", help="Retirer du BV"):
+                            lst = list(bv_config[nom_bv])
+                            lst.pop(i)
+                            bv_config[nom_bv] = lst
+                            st.session_state["bv_config"] = bv_config
+                            st.rerun()
                 else:
                     st.caption("Aucune station assignée.")
 
