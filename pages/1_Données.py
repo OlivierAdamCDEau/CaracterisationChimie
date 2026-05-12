@@ -324,44 +324,66 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
 
             with col_bv1:
                 stations_bv = bv_config[nom_bv]
-                non_assignees = [s for s in stations_pool if s not in stations_bv]
-                a_ajouter = st.multiselect(
-                    f"Ajouter des stations au BV « {nom_bv} »",
-                    options=non_assignees,
-                    format_func=lambda x: f"{lb_dispo.get(x, x)} ({x})",
-                    key=f"add_{nom_bv}",
-                )
-                if a_ajouter:
-                    bv_config[nom_bv] = stations_bv + [s for s in a_ajouter if s not in stations_bv]
-                    st.session_state["bv_config"] = bv_config
-                    st.rerun()
 
+                # ── Ajout de stations ─────────────────────────────────────
+                # IMPORTANT : on NE déclenche PAS de rerun() sur le multiselect
+                # lui-même — ça provoquerait un conflit d'état Streamlit quand
+                # les options changent entre deux reruns.
+                # Pattern correct : multiselect + bouton "Ajouter" séparé.
+                non_assignees = [s for s in stations_pool if s not in stations_bv]
+                key_ms = f"add_ms_{nom_bv}"
+                st.multiselect(
+                    f"Sélectionner les stations à ajouter au BV « {nom_bv} »",
+                    options=non_assignees,
+                    default=[],
+                    format_func=lambda x: f"{lb_dispo.get(x, x)} ({x})",
+                    key=key_ms,
+                )
+                if st.button(f"➕ Ajouter au BV « {nom_bv} »",
+                             key=f"add_btn_{nom_bv}", use_container_width=True):
+                    selections = st.session_state.get(key_ms, [])
+                    if selections:
+                        bv_config[nom_bv] = stations_bv + [
+                            s for s in selections if s not in stations_bv
+                        ]
+                        st.session_state["bv_config"] = bv_config
+                        # Vider le multiselect avant le rerun pour éviter le conflit
+                        st.session_state[key_ms] = []
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Sélectionnez au moins une station.")
+
+                # ── Liste des stations déjà dans le BV ───────────────────
                 if stations_bv:
-                    st.markdown(f"**Stations** ({len(stations_bv)}) :")
+                    st.markdown(f"**Stations dans ce BV** ({len(stations_bv)}) :")
                     if _use_dnd:
                         labels = [f"{lb_dispo.get(s, s)} ({s})" for s in stations_bv]
                         sorted_labels = sort_items(labels, key=f"sort_{nom_bv}")
                         lbl2code = {f"{lb_dispo.get(s, s)} ({s})": s for s in stations_bv}
-                        bv_config[nom_bv] = [lbl2code[l] for l in sorted_labels if l in lbl2code]
-                        st.session_state["bv_config"] = bv_config
+                        new_order = [lbl2code[l] for l in sorted_labels if l in lbl2code]
+                        if new_order != stations_bv:
+                            bv_config[nom_bv] = new_order
+                            st.session_state["bv_config"] = bv_config
                     else:
-                        for i, s in enumerate(stations_bv):
+                        for i, s in enumerate(list(stations_bv)):
                             c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
                             c1.markdown(f"`{i+1}.` {lb_dispo.get(s, s)} `({s})`")
-                            if i > 0 and c2.button("↑", key=f"up_{nom_bv}_{s}"):
-                                lst = bv_config[nom_bv]
+                            if i > 0 and c2.button("↑", key=f"up_{nom_bv}_{i}"):
+                                lst = list(bv_config[nom_bv])
                                 lst[i-1], lst[i] = lst[i], lst[i-1]
                                 bv_config[nom_bv] = lst
                                 st.session_state["bv_config"] = bv_config
                                 st.rerun()
-                            if i < len(stations_bv)-1 and c3.button("↓", key=f"dn_{nom_bv}_{s}"):
-                                lst = bv_config[nom_bv]
+                            if i < len(stations_bv)-1 and c3.button("↓", key=f"dn_{nom_bv}_{i}"):
+                                lst = list(bv_config[nom_bv])
                                 lst[i], lst[i+1] = lst[i+1], lst[i]
                                 bv_config[nom_bv] = lst
                                 st.session_state["bv_config"] = bv_config
                                 st.rerun()
-                            if c4.button("✖", key=f"rm_{nom_bv}_{s}"):
-                                bv_config[nom_bv].remove(s)
+                            if c4.button("✖", key=f"rm_{nom_bv}_{i}"):
+                                lst = list(bv_config[nom_bv])
+                                lst.pop(i)
+                                bv_config[nom_bv] = lst
                                 st.session_state["bv_config"] = bv_config
                                 st.rerun()
                 else:
