@@ -337,6 +337,12 @@ if st.session_state.get("_pending_rm"):
     st.session_state["bv_config"][_bv_name] = _lst
     _bv_changed = True
 
+# Chargement d'un fichier JSON de config BV
+if st.session_state.get("_pending_load_bv") is not None:
+    _loaded = st.session_state.pop("_pending_load_bv")
+    st.session_state["bv_config"] = _loaded
+    _bv_changed = True
+
 if _bv_changed:
     st.rerun()
 
@@ -369,8 +375,44 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
                 st.session_state["_pending_nouveau_bv"] = nom
                 st.rerun()
 
+    # ── Charger / Sauvegarder — toujours accessible ─────────────────────────
+    with st.expander("💾 Sauvegarder / Charger la configuration BV", expanded=False):
+        col_s1, col_s2 = st.columns([3, 1])
+        nom_fichier = col_s1.text_input(
+            "Nom du fichier de sauvegarde",
+            value="config_bv",
+            key="bv_save_name",
+            help="Sans extension — .json sera ajouté automatiquement",
+        )
+        nom_fichier_propre = (nom_fichier.strip() or "config_bv").replace(" ", "_")
+        bv_json = json.dumps(bv_config, ensure_ascii=False, indent=2)
+        col_s2.markdown("<br>", unsafe_allow_html=True)
+        col_s2.download_button(
+            "⬇️ Sauvegarder",
+            data=bv_json,
+            file_name=f"{nom_fichier_propre}.json",
+            mime="application/json",
+            use_container_width=True,
+            disabled=not bv_config,
+        )
+        st.markdown("---")
+        uploaded_cfg = st.file_uploader(
+            "⬆️ Charger une configuration BV (JSON)",
+            type=["json"], key="bv_cfg_upload",
+        )
+        if uploaded_cfg:
+            try:
+                loaded = json.loads(uploaded_cfg.read())
+                if isinstance(loaded, dict):
+                    st.session_state["_pending_load_bv"] = loaded
+                    st.rerun()
+                else:
+                    st.error("❌ Format JSON invalide (objet attendu).")
+            except Exception as ex:
+                st.error(f"❌ Erreur de lecture : {ex}")
+
     if not bv_config:
-        st.info("Aucun BV configuré. Créez-en un ci-dessus.")
+        st.info("Aucun BV configuré. Créez-en un ci-dessus ou chargez une configuration.")
     else:
         stations_pool = stations_selectionnees if stations_selectionnees else stations_dispo
 
@@ -456,22 +498,7 @@ with st.expander("🗺️ Configurer les Bassins Versants", expanded=False):
         else:
             st.session_state["bv_actif"] = None
 
-        with st.expander("💾 Sauvegarder / Charger la configuration BV"):
-            bv_json = json.dumps(bv_config, ensure_ascii=False, indent=2)
-            st.download_button("⬇️ Télécharger la config BV (JSON)",
-                               data=bv_json, file_name="config_bv.json",
-                               mime="application/json")
-            uploaded_cfg = st.file_uploader("⬆️ Charger une config BV (JSON)",
-                                            type=["json"], key="bv_cfg_upload")
-            if uploaded_cfg:
-                try:
-                    loaded = json.loads(uploaded_cfg.read())
-                    if isinstance(loaded, dict):
-                        st.session_state["bv_config"] = loaded
-                        st.success("✅ Configuration BV chargée.")
-                        st.rerun()
-                except Exception as ex:
-                    st.error(f"❌ Erreur : {ex}")
+
 
 # ── Étape 6 : Lancement ──────────────────────────────────────────────────────
 st.markdown("---")

@@ -106,34 +106,44 @@ if st.button("🔬 Calculer l'empreinte chimique", type="primary",
                 )
             except Exception as e: st.warning(f"⚠️ Distances : {e}")
 
-            st.session_state["figs_m03"]      = figs
+            # Convertir les figures en bytes AVANT de les stocker en session
+            # → évite le crash thread-safety quand Streamlit re-rend les objets
+            #   Figure lors d'un scroll ou d'un rerun
+            import io, matplotlib.pyplot as plt
+            figs_bytes = {}
+            for nom_fig, fig_obj in figs.items():
+                buf = io.BytesIO()
+                fig_obj.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+                buf.seek(0)
+                figs_bytes[nom_fig] = buf.read()
+                plt.close(fig_obj)
+
+            st.session_state["figs_m03"]      = figs_bytes
             st.session_state["pivot_classes"] = pivot_classes_pct
             st.session_state["m03_calcule"]   = True
-            st.success(f"✅ {len(figs)} figure(s) générée(s).")
+            st.success(f"✅ {len(figs_bytes)} figure(s) générée(s).")
             st.rerun()
 
         except Exception as e:
             import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
-figs = st.session_state.get("figs_m03")
-if figs:
+# Les figures sont stockées en bytes PNG (pas en objets Figure) pour éviter
+# le crash thread-safety de matplotlib lors des reruns Streamlit.
+figs_bytes = st.session_state.get("figs_m03")
+if figs_bytes:
     TITRES = {
         "radar":           "Radar — profil normalisé",
         "heatmap_classes": "Heatmap — classes de qualité",
         "heatmap_freq":    "Heatmap — fréquences de dépassement",
         "distances":       "Matrice des distances inter-stations",
     }
-    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, fig) in zip(tabs, figs.items()):
+    tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
+    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.pyplot(fig, use_container_width=True)
-            from modules.m08_export import exporter_figure
-            c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(fig,"png"),
-                f"m03_{nom}.png","image/png", key=f"png3_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(fig,"svg"),
-                f"m03_{nom}.svg","image/svg+xml", key=f"svg3_{nom}")
+            st.image(png_bytes, use_container_width=True)
+            st.download_button("⬇️ PNG", png_bytes,
+                f"m03_{nom}.png", "image/png", key=f"png3_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>',
