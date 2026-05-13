@@ -1000,7 +1000,7 @@ def dendrogramme_stations(
     titre: str = "Clustering hiérarchique des stations",
     figsize: tuple = (10, 6),
     dpi: int = 150,
-) -> tuple[plt.Figure, list, Optional[dict]]:
+) -> tuple[plt.Figure, list, Optional[dict], int]:
     """
     Dendrogramme de clustering hiérarchique sur les stations.
 
@@ -1083,9 +1083,76 @@ def dendrogramme_stations(
             + ", ".join(f"{s}→G{c}" for s, c in dict_clusters.items())
         )
 
+    # ── Détection automatique du coude ───────────────────────────────────────
+    n_groupes_suggere = 1
+    if len(Z) >= 2:
+        sauts = Z[1:, 2] - Z[:-1, 2]
+        if sauts.max() > 0:
+            idx_coude = int(sauts.argmax())
+            n_groupes_suggere = len(Z) - idx_coude
+            pct_coude = float(sauts.max() / max(Z[-1, 2], 1e-9) * 100)
+        else:
+            pct_coude = 0.0
+    else:
+        pct_coude = 0.0
+
+    # Interprétation
+    sep = chr(10)
+    txt = []
+    if pct_coude > 30:
+        txt.append("Saut important (+{:.0f}%) -> {} groupes naturels distincts suggeres.".format(
+            pct_coude, n_groupes_suggere))
+    elif pct_coude > 15:
+        txt.append("Saut modere (+{:.0f}%) -> {} groupes possibles.".format(
+            pct_coude, n_groupes_suggere))
+    else:
+        txt.append("Pas de saut marque -> continuum de similarite, pas de groupement evident.")
+
+    # Légende couleurs si clusters définis
+    if dict_clusters:
+        groupes = {}
+        for s, g in dict_clusters.items():
+            lb = _nom_court_station(lb_stations.get(s, s)) if lb_stations else str(s)
+            groupes.setdefault(g, []).append(lb)
+        PALETTE_C = ["#2563eb","#16a34a","#dc2626","#d97706",
+                     "#7c3aed","#0891b2","#be185d","#4d7c0f"]
+        handles_g = [
+            mpatches.Patch(
+                facecolor=PALETTE_C[(g-1) % len(PALETTE_C)],
+                label="G{} : {}".format(g, ", ".join(noms)),
+            )
+            for g, noms in sorted(groupes.items())
+        ]
+        ax.legend(handles=handles_g, loc="upper right", fontsize=7,
+                  title="Groupes", title_fontsize=7, framealpha=0.88)
+        txt.append("{} groupe(s) :".format(len(groupes)))
+        for gid, membres in sorted(groupes.items()):
+            txt.append("  G{} : {}".format(gid, ", ".join(membres)))
+        alertes.append(
+            "ℹ️ Clustering ({}) : {} groupes — ".format(methode_linkage, len(groupes))
+            + " | ".join("G{}: {}".format(g, ", ".join(m)) for g, m in sorted(groupes.items()))
+        )
+    else:
+        if n_groupes_suggere > 1:
+            alertes.append(
+                "ℹ️ Saut detecte (+{:.0f}%) -> {} groupes suggeres. "
+                "Utilisez l'option 'N groupes' pour les afficher.".format(
+                    pct_coude, n_groupes_suggere)
+            )
+        else:
+            alertes.append("ℹ️ Pas de groupement naturel evident dans ce dendrogramme.")
+
+    if txt:
+        fig.text(0.01, 0.01, sep.join(txt),
+                 fontsize=7, color="#374151", va="bottom", ha="left",
+                 transform=fig.transFigure,
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="#f0f7ff",
+                           edgecolor="#bfdbfe", alpha=0.9))
+        fig.subplots_adjust(bottom=0.05 + 0.022 * len(txt))
+
     _ajouter_watermark(fig, ax=ax)
     fig.tight_layout()
-    return fig, alertes, dict_clusters
+    return fig, alertes, dict_clusters, n_groupes_suggere
 
 
 # ---------------------------------------------------------------------------
