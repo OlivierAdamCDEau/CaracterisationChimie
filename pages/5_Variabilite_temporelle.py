@@ -70,10 +70,17 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
             # Convertir en bytes PNG avant stockage → survit à la nav entre pages
             figs_bytes = {}
             for _nom, _fig in figs.items():
-                _buf = io.BytesIO()
-                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
-                _buf.seek(0)
-                figs_bytes[_nom] = _buf.read()
+                _buf_png = io.BytesIO()
+                _fig.savefig(_buf_png, format="png", dpi=150, bbox_inches="tight")
+                _buf_png.seek(0)
+                _buf_svg = io.BytesIO()
+                try:
+                    _fig.savefig(_buf_svg, format="svg", bbox_inches="tight")
+                    _buf_svg.seek(0)
+                    _svg = _buf_svg.read()
+                except Exception:
+                    _svg = b""
+                figs_bytes[_nom] = {"png": _buf_png.read(), "svg": _svg}
                 plt.close(_fig)
             import gc; gc.collect()
             st.session_state["figs_m05"]    = figs_bytes
@@ -95,9 +102,11 @@ if figs_bytes:
         "saison":   "Profils saisonniers",
     }
     tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, png_bytes) in zip(tabs, figs.items()):
+    for tab, (nom, fig_data) in zip(tabs, figs.items()):
         with tab:
-            st.image(png_bytes, use_container_width=True)
+            png_data = fig_data["png"] if isinstance(fig_data, dict) else fig_data
+            svg_data = fig_data.get("svg", b"") if isinstance(fig_data, dict) else b""
+            st.image(png_data, use_container_width=True)
 
             # Légende stations sous la figure
             lb_stations = st.session_state.get("lb_stations", {})
@@ -115,12 +124,12 @@ if figs_bytes:
                         unsafe_allow_html=True,
                     )
 
-            from modules.m08_export import exporter_figure
-            c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(png_bytes,"png"),
-                f"m05_{nom}.png","image/png", key=f"png5_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(png_bytes,"svg"),
-                f"m05_{nom}.svg","image/svg+xml", key=f"svg5_{nom}")
+            dl1, dl2 = st.columns(2)
+            dl1.download_button("⬇️ PNG", png_data,
+                f"m05_{nom}.png", "image/png", key=f"png5_{nom}")
+            if svg_data:
+                dl2.download_button("⬇️ SVG", svg_data,
+                    f"m05_{nom}.svg", "image/svg+xml", key=f"svg5_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)

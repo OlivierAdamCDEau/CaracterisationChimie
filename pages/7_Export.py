@@ -46,16 +46,22 @@ st.markdown(f"**{len(toutes_figs)} figure(s) disponibles** dans la session.")
 # ── Section 1 : Figures individuelles ────────────────────────────────────────
 st.markdown("### 1. Figures individuelles")
 if toutes_figs:
-    for nom, fig in toutes_figs.items():
+    for nom, fig_data in toutes_figs.items():
         c1, c2, c3 = st.columns([3, 1, 1])
         c1.markdown(f"📊 `{nom}`")
-        # Toutes les figures sont stockées en bytes PNG depuis la v4
-        png_data = exporter_figure(fig, "png", dpi=200)
+        # Figures stockées comme dict {"png": bytes, "svg": bytes} depuis v5
+        if isinstance(fig_data, dict):
+            png_data = fig_data.get("png", b"")
+            svg_data = fig_data.get("svg", b"")
+        elif isinstance(fig_data, (bytes, bytearray)):
+            png_data = bytes(fig_data)
+            svg_data = b""
+        else:
+            png_data = exporter_figure(fig_data, "png", dpi=200)
+            svg_data = exporter_figure(fig_data, "svg")
         c2.download_button("⬇️ PNG", png_data,
             f"{nom}.png", "image/png", key=f"png_{nom}")
-        # SVG uniquement si objet matplotlib (pas bytes)
-        if not isinstance(fig, (bytes, bytearray)):
-            svg_data = exporter_figure(fig, "svg")
+        if svg_data:
             c3.download_button("⬇️ SVG", svg_data,
                 f"{nom}.svg", "image/svg+xml", key=f"svg_{nom}")
         else:

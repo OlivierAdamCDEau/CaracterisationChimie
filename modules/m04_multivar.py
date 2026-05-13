@@ -740,6 +740,7 @@ def biplot_double_projection(
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
     labels_complets: bool = False,
+    biplot_separe: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Double projection (paramètres & familles SANDRE)",
@@ -1323,6 +1324,7 @@ def figure_multivar_complete(
             ordre_stations=ordre_stations, lb_stations=lb_stations,
             n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
             labels_complets=corr_labels_complets,
+            biplot_separe=biplot_separe,
             corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
             titre=f"{titre_global} — Double projection", dpi=dpi,
         )

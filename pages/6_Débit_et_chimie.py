@@ -158,10 +158,17 @@ if st.button("🔬 Calculer les relations C-Q", type="primary",
             # Convertir en bytes PNG avant stockage → survit à la nav entre pages
             figs_bytes = {}
             for _nom, _fig in figs.items():
-                _buf = io.BytesIO()
-                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
-                _buf.seek(0)
-                figs_bytes[_nom] = _buf.read()
+                _buf_png = io.BytesIO()
+                _fig.savefig(_buf_png, format="png", dpi=150, bbox_inches="tight")
+                _buf_png.seek(0)
+                _buf_svg = io.BytesIO()
+                try:
+                    _fig.savefig(_buf_svg, format="svg", bbox_inches="tight")
+                    _buf_svg.seek(0)
+                    _svg = _buf_svg.read()
+                except Exception:
+                    _svg = b""
+                figs_bytes[_nom] = {"png": _buf_png.read(), "svg": _svg}
                 plt.close(_fig)
             import gc; gc.collect()
             st.session_state["figs_m06"]    = figs_bytes
@@ -185,15 +192,17 @@ if figs_bytes:
         "cq_comportements": "Heatmap des comportements chimio-dynamiques",
     }
     tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
+    for tab, (nom, fig_data) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.image(png_bytes, use_container_width=True)
-            from modules.m08_export import exporter_figure
-            c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(png_bytes,"png"),
-                f"m06_{nom}.png","image/png", key=f"png6_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(png_bytes,"svg"),
-                f"m06_{nom}.svg","image/svg+xml", key=f"svg6_{nom}")
+            png_data = fig_data["png"] if isinstance(fig_data, dict) else fig_data
+            svg_data = fig_data.get("svg", b"") if isinstance(fig_data, dict) else b""
+            st.image(png_data, use_container_width=True)
+            dl1, dl2 = st.columns(2)
+            dl1.download_button("⬇️ PNG", png_data,
+                f"m06_{nom}.png", "image/png", key=f"png6_{nom}")
+            if svg_data:
+                dl2.download_button("⬇️ SVG", svg_data,
+                    f"m06_{nom}.svg", "image/svg+xml", key=f"svg6_{nom}")
 
     if df_reg is not None and not df_reg.empty:
         st.markdown("### Tableau des régressions")

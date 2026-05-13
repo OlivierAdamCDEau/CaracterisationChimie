@@ -124,10 +124,17 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
             # Convertir en bytes PNG pour éviter le crash thread-safety matplotlib
             figs_bytes = {}
             for nom_fig, fig_obj in figs.items():
-                buf = io.BytesIO()
-                fig_obj.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-                buf.seek(0)
-                figs_bytes[nom_fig] = buf.read()
+                buf_png = io.BytesIO()
+                fig_obj.savefig(buf_png, format="png", dpi=150, bbox_inches="tight")
+                buf_png.seek(0)
+                buf_svg = io.BytesIO()
+                try:
+                    fig_obj.savefig(buf_svg, format="svg", bbox_inches="tight")
+                    buf_svg.seek(0)
+                    svg_data = buf_svg.read()
+                except Exception:
+                    svg_data = b""
+                figs_bytes[nom_fig] = {"png": buf_png.read(), "svg": svg_data}
                 plt.close(fig_obj)
             import gc; gc.collect()
 
@@ -177,14 +184,23 @@ if figs_bytes:
         )
 
     tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
-    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
+    for tab, (nom, fig_data) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.image(png_bytes, use_container_width=True)
-            st.download_button(
-                "⬇️ PNG", png_bytes,
+            png_data = fig_data["png"] if isinstance(fig_data, dict) else fig_data
+            svg_data = fig_data.get("svg", b"") if isinstance(fig_data, dict) else b""
+            st.image(png_data, use_container_width=True)
+            dl1, dl2 = st.columns(2)
+            dl1.download_button(
+                "⬇️ PNG", png_data,
                 f"m04_{nom}.png", "image/png",
                 key=f"png4_{nom}",
             )
+            if svg_data:
+                dl2.download_button(
+                    "⬇️ SVG", svg_data,
+                    f"m04_{nom}.svg", "image/svg+xml",
+                    key=f"svg4_{nom}",
+                )
 
 st.markdown("---")
 st.markdown(
