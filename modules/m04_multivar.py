@@ -895,6 +895,7 @@ def dendrogramme_stations(
     methode_linkage: str = "ward",
     metric: str = "euclidean",
     n_clusters: int = 0,
+    corpus_commun: bool = False,
     titre: str = "Clustering hiérarchique des stations",
     figsize: tuple = (10, 6),
     dpi: int = 150,
@@ -919,7 +920,7 @@ def dendrogramme_stations(
     alertes = []
     dict_clusters = None
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_stations=3)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_stations=3, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes, None
@@ -999,6 +1000,8 @@ def matrice_correlations(
     methode: str = "pearson",
     annot: bool = True,
     seuil_affichage: float = 0.0,
+    labels_complets: bool = False,
+    corpus_commun: bool = False,
     titre: str = "Corrélations entre paramètres",
     figsize: tuple = (12, 10),
     dpi: int = 150,
