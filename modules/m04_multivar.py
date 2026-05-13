@@ -682,39 +682,46 @@ def biplot_acp(
     # Si pas de familles : panneau légende vide mais conservé pour l'espacement
 
     # ── Mode biplot séparé : générer une figure stations et une figure params ──
-    if biplot_separe:
+    # Utilise les variables capturées depuis le panneau individuel (ind)
+    if biplot_separe and 'pts_st_ind' in dir():
+        pts_ref   = pts_st_ind      # [(x,y,label,color)]
+        vect_ref  = vecteurs_xy_ind
+        lbl_ref   = labels_v_ind
+        col_ref   = couleurs_v_ind
+        vexp_ref  = var_exp_ind
+
         # Figure stations seulement
         fig_st, ax_st = plt.subplots(figsize=(7, 6), dpi=dpi)
-        for i, (s_xi, s_yi, label_si, col_si) in enumerate(pts_stations):
-            ax_st.scatter(s_xi, s_yi, color=col_si, s=80, zorder=5)
+        for x_i, y_i, lbl_i, col_i in pts_ref:
+            ax_st.scatter(x_i, y_i, color=col_i, s=80, zorder=5)
         _placer_labels_biplot(
             ax_st,
-            [(x, y) for x, y, _, _ in pts_stations],
-            [lbl for _, _, lbl, _ in pts_stations],
-            [col for _, _, _, col in pts_stations],
+            [(x, y) for x, y, _, _ in pts_ref],
+            [lbl for _, _, lbl, _ in pts_ref],
+            [col for _, _, _, col in pts_ref],
             fontsize=9, marge=label_offset * 1.5,
         )
         ax_st.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
         ax_st.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
-        ax_st.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
-        ax_st.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_st.set_xlabel("CP1 ({:.1f}%)".format(vexp_ref[0]), fontsize=9)
+        ax_st.set_ylabel("CP2 ({:.1f}%)".format(vexp_ref[1]), fontsize=9)
         ax_st.set_title("ACP — Stations", fontsize=10, fontweight="bold")
         _ajouter_watermark(fig_st, ax=ax_st)
         fig_st.tight_layout()
 
         # Figure paramètres seulement
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6), dpi=dpi)
-        for (vx, vy), lv, cv in zip(vecteurs_xy, labels_vecteurs, couleurs_vecteurs):
+        for (vx, vy), lv, cv in zip(vect_ref, lbl_ref, col_ref):
             ax_pm.annotate("", xy=(vx, vy), xytext=(0, 0),
                 arrowprops=dict(arrowstyle="-|>", color=cv, lw=1.2))
-        _placer_labels_biplot(ax_pm, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
+        _placer_labels_biplot(ax_pm, vect_ref, lbl_ref, col_ref,
                               fontsize=8, marge=label_offset)
         ax_pm.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
         ax_pm.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
-        lim = max(abs(v) for xy in vecteurs_xy for v in xy) * 1.3 or 1
+        lim = max(abs(v) for xy in vect_ref for v in xy) * 1.3 or 1
         ax_pm.set_xlim(-lim, lim); ax_pm.set_ylim(-lim, lim)
-        ax_pm.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
-        ax_pm.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_pm.set_xlabel("CP1 ({:.1f}%)".format(vexp_ref[0]), fontsize=9)
+        ax_pm.set_ylabel("CP2 ({:.1f}%)".format(vexp_ref[1]), fontsize=9)
         ax_pm.set_title("ACP — Paramètres (loadings)", fontsize=10, fontweight="bold")
         _ajouter_watermark(fig_pm, ax=ax_pm)
         fig_pm.tight_layout()
@@ -741,6 +748,7 @@ def biplot_double_projection(
     echelle_vecteur: float = 1.0,
     labels_complets: bool = False,
     biplot_separe: bool = False,
+    label_offset: float = 0.055,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Double projection (paramètres & familles SANDRE)",
@@ -826,7 +834,7 @@ def biplot_double_projection(
             ax.annotate(label_st, (s_x[i], s_y[i]),
                         textcoords="offset points", xytext=(4, 4),
                         fontsize=8, color=_couleur_station(i), fontweight="bold", zorder=6)
-            pts_st.append((s_x[i], s_y[i]))
+            pts_st.append((s_x[i], s_y[i], label_st, _couleur_station(i)))
 
         vecteurs_xy, labels_v, couleurs_v = [], [], []
         for j, idx in enumerate(idx_top):
@@ -857,6 +865,7 @@ def biplot_double_projection(
         ax.set_aspect("equal", adjustable="datalim")
         fig.canvas.draw()
         _placer_labels_biplot(ax, vecteurs_xy, labels_v, couleurs_v, fontsize=8)
+        return pts_st, vecteurs_xy, labels_v, couleurs_v, var_exp
 
     # --- Panneau gauche : paramètres individuels ---
     df_ind, msgs, taux_imp_ind = _prepare_pivot(
@@ -873,12 +882,14 @@ def biplot_double_projection(
         idx_top_ind = np.argsort(contrib_ind)[::-1][:n_vecteurs]
         scale_ind = ((np.max(np.abs(scores_ind[:, 0])) +
                       np.max(np.abs(scores_ind[:, 1]))) / 2 * echelle_vecteur)
-        _tracer_biplot(axes[0], df_ind, pca_ind, scores_ind,
-                       list(df_ind.columns), lb_map, idx_top_ind, load_ind,
-                       0, 1, var_ind, list(df_ind.index), scale_ind,
-                       avec_ref=True, avec_familles=use_familles,
-                       taux_imputation=taux_imp_ind, seuil_imputation=seuil_imputation,
-                       labels_complets_=labels_complets)
+        pts_st_ind, vecteurs_xy_ind, labels_v_ind, couleurs_v_ind, var_exp_ind = (
+            _tracer_biplot(axes[0], df_ind, pca_ind, scores_ind,
+                           list(df_ind.columns), lb_map, idx_top_ind, load_ind,
+                           0, 1, var_ind, list(df_ind.index), scale_ind,
+                           avec_ref=True, avec_familles=use_familles,
+                           taux_imputation=taux_imp_ind, seuil_imputation=seuil_imputation,
+                           labels_complets_=labels_complets)
+        )
         axes[0].set_title("Paramètres individuels", fontsize=9, fontweight="bold")
 
     # --- Panneau droit : familles SANDRE ---
@@ -902,6 +913,7 @@ def biplot_double_projection(
                        taux_imputation={}, seuil_imputation=seuil_imputation,
                        labels_complets_=labels_complets)
         axes[1].set_title("Familles SANDRE", fontsize=9, fontweight="bold")
+        # (return value not needed for familles panel)
 
     # Légende familles uniquement dans le panneau dédié (stations lisibles sur la figure)
     if use_familles and couleur_par_famille_glob:
@@ -922,39 +934,46 @@ def biplot_double_projection(
 
     fig.suptitle(titre, fontsize=11, fontweight="bold")
     # ── Mode biplot séparé : générer une figure stations et une figure params ──
-    if biplot_separe:
+    # Utilise les variables capturées depuis le panneau individuel (ind)
+    if biplot_separe and 'pts_st_ind' in dir():
+        pts_ref   = pts_st_ind      # [(x,y,label,color)]
+        vect_ref  = vecteurs_xy_ind
+        lbl_ref   = labels_v_ind
+        col_ref   = couleurs_v_ind
+        vexp_ref  = var_exp_ind
+
         # Figure stations seulement
         fig_st, ax_st = plt.subplots(figsize=(7, 6), dpi=dpi)
-        for i, (s_xi, s_yi, label_si, col_si) in enumerate(pts_stations):
-            ax_st.scatter(s_xi, s_yi, color=col_si, s=80, zorder=5)
+        for x_i, y_i, lbl_i, col_i in pts_ref:
+            ax_st.scatter(x_i, y_i, color=col_i, s=80, zorder=5)
         _placer_labels_biplot(
             ax_st,
-            [(x, y) for x, y, _, _ in pts_stations],
-            [lbl for _, _, lbl, _ in pts_stations],
-            [col for _, _, _, col in pts_stations],
+            [(x, y) for x, y, _, _ in pts_ref],
+            [lbl for _, _, lbl, _ in pts_ref],
+            [col for _, _, _, col in pts_ref],
             fontsize=9, marge=label_offset * 1.5,
         )
         ax_st.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
         ax_st.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
-        ax_st.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
-        ax_st.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_st.set_xlabel("CP1 ({:.1f}%)".format(vexp_ref[0]), fontsize=9)
+        ax_st.set_ylabel("CP2 ({:.1f}%)".format(vexp_ref[1]), fontsize=9)
         ax_st.set_title("ACP — Stations", fontsize=10, fontweight="bold")
         _ajouter_watermark(fig_st, ax=ax_st)
         fig_st.tight_layout()
 
         # Figure paramètres seulement
         fig_pm, ax_pm = plt.subplots(figsize=(7, 6), dpi=dpi)
-        for (vx, vy), lv, cv in zip(vecteurs_xy, labels_vecteurs, couleurs_vecteurs):
+        for (vx, vy), lv, cv in zip(vect_ref, lbl_ref, col_ref):
             ax_pm.annotate("", xy=(vx, vy), xytext=(0, 0),
                 arrowprops=dict(arrowstyle="-|>", color=cv, lw=1.2))
-        _placer_labels_biplot(ax_pm, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
+        _placer_labels_biplot(ax_pm, vect_ref, lbl_ref, col_ref,
                               fontsize=8, marge=label_offset)
         ax_pm.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
         ax_pm.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
-        lim = max(abs(v) for xy in vecteurs_xy for v in xy) * 1.3 or 1
+        lim = max(abs(v) for xy in vect_ref for v in xy) * 1.3 or 1
         ax_pm.set_xlim(-lim, lim); ax_pm.set_ylim(-lim, lim)
-        ax_pm.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
-        ax_pm.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_pm.set_xlabel("CP1 ({:.1f}%)".format(vexp_ref[0]), fontsize=9)
+        ax_pm.set_ylabel("CP2 ({:.1f}%)".format(vexp_ref[1]), fontsize=9)
         ax_pm.set_title("ACP — Paramètres (loadings)", fontsize=10, fontweight="bold")
         _ajouter_watermark(fig_pm, ax=ax_pm)
         fig_pm.tight_layout()
@@ -1325,6 +1344,7 @@ def figure_multivar_complete(
             n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
             labels_complets=corr_labels_complets,
             biplot_separe=biplot_separe,
+            label_offset=label_offset,
             corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
             titre=f"{titre_global} — Double projection", dpi=dpi,
         )
