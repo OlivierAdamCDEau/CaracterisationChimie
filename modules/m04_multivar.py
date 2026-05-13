@@ -1153,12 +1153,14 @@ def figure_multivar_complete(
     lb_stations: Optional[dict] = None,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    label_offset: float = 0.055,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     n_clusters: int = 0,
     methode_linkage: str = "ward",
     methode_corr: str = "pearson",
     titre_global: str = "Analyses multivariées — Chimie globale",
+    corr_labels_complets: bool = False,
     dpi: int = 150,
 ) -> tuple[dict[str, plt.Figure], list]:
     """
@@ -1191,6 +1193,8 @@ def figure_multivar_complete(
         fam_map=fam_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
+        label_offset=label_offset,
+        labels_complets=corr_labels_complets,
         corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
         titre=f"{titre_global} — Biplot", dpi=dpi,
     )

@@ -1,7 +1,8 @@
 """
 pages/3_Empreinte_chimique.py — Empreinte chimique (M03)
 """
-import streamlit as st, sys
+import streamlit as st, sys, io
+import matplotlib.pyplot as plt
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Empreinte chimique", page_icon="🧪", layout="wide")
@@ -106,45 +107,44 @@ if st.button("🔬 Calculer l'empreinte chimique", type="primary",
                 )
             except Exception as e: st.warning(f"⚠️ Distances : {e}")
 
-            # Convertir les figures en bytes AVANT de les stocker en session
-            # → évite le crash thread-safety quand Streamlit re-rend les objets
-            #   Figure lors d'un scroll ou d'un rerun
-            import io, matplotlib.pyplot as plt
+            # Convertir en bytes PNG avant stockage → survit à la nav entre pages
             figs_bytes = {}
-            for nom_fig, fig_obj in figs.items():
-                buf = io.BytesIO()
-                fig_obj.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-                buf.seek(0)
-                figs_bytes[nom_fig] = buf.read()
-                plt.close(fig_obj)
+            for _nom, _fig in figs.items():
+                _buf = io.BytesIO()
+                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
+                _buf.seek(0)
+                figs_bytes[_nom] = _buf.read()
+                plt.close(_fig)
             import gc; gc.collect()
-
             st.session_state["figs_m03"]      = figs_bytes
             st.session_state["pivot_classes"] = pivot_classes_pct
             st.session_state["m03_calcule"]   = True
-            st.success(f"✅ {len(figs_bytes)} figure(s) générée(s).")
+            st.success(f"✅ {len(figs)} figure(s) générée(s).")
             st.rerun()
 
         except Exception as e:
             import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
-# Les figures sont stockées en bytes PNG (pas en objets Figure) pour éviter
-# le crash thread-safety de matplotlib lors des reruns Streamlit.
 figs_bytes = st.session_state.get("figs_m03")
 if figs_bytes:
+    figs = figs_bytes   # alias pour compatibilité
     TITRES = {
         "radar":           "Radar — profil normalisé",
         "heatmap_classes": "Heatmap — classes de qualité",
         "heatmap_freq":    "Heatmap — fréquences de dépassement",
         "distances":       "Matrice des distances inter-stations",
     }
-    tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
-    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
+    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
+    for tab, (nom, png_bytes) in zip(tabs, figs.items()):
         with tab:
             st.image(png_bytes, use_container_width=True)
-            st.download_button("⬇️ PNG", png_bytes,
-                f"m03_{nom}.png", "image/png", key=f"png3_{nom}")
+            from modules.m08_export import exporter_figure
+            c1, c2 = st.columns(2)
+            c1.download_button("⬇️ PNG", exporter_figure(png_bytes,"png"),
+                f"m03_{nom}.png","image/png", key=f"png3_{nom}")
+            c2.download_button("⬇️ SVG", exporter_figure(png_bytes,"svg"),
+                f"m03_{nom}.svg","image/svg+xml", key=f"svg3_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>',

@@ -3,7 +3,8 @@ pages/6_Débit_et_chimie.py — Débit et chimie (M06)
 Options réservées aux rôles admin/collaborateur.
 Affichage corrigé des stations avec débit co-localisé.
 """
-import streamlit as st, sys
+import streamlit as st, sys, io
+import matplotlib.pyplot as plt
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Débit et chimie", page_icon="💧", layout="wide")
@@ -154,7 +155,16 @@ if st.button("🔬 Calculer les relations C-Q", type="primary",
                 seuil_b=seuil_b,
                 r2_min=r2_min,
             )
-            st.session_state["figs_m06"]    = figs
+            # Convertir en bytes PNG avant stockage → survit à la nav entre pages
+            figs_bytes = {}
+            for _nom, _fig in figs.items():
+                _buf = io.BytesIO()
+                _fig.savefig(_buf, format="png", dpi=150, bbox_inches="tight")
+                _buf.seek(0)
+                figs_bytes[_nom] = _buf.read()
+                plt.close(_fig)
+            import gc; gc.collect()
+            st.session_state["figs_m06"]    = figs_bytes
             st.session_state["df_reg_cq"]   = df_reg
             st.session_state["m06_calcule"] = True
             for a in alertes:
@@ -165,23 +175,24 @@ if st.button("🔬 Calculer les relations C-Q", type="primary",
             import traceback; st.error(f"❌ {e}"); st.code(traceback.format_exc())
 
 # ── Affichage ─────────────────────────────────────────────────────────────────
-figs   = st.session_state.get("figs_m06")
-df_reg = st.session_state.get("df_reg_cq")
+figs_bytes = st.session_state.get("figs_m06")
+figs       = figs_bytes   # alias pour compatibilité
+df_reg     = st.session_state.get("df_reg_cq")
 
-if figs:
+if figs_bytes:
     TITRES = {
         "cq_params":        "Nuages C-Q par paramètre",
         "cq_comportements": "Heatmap des comportements chimio-dynamiques",
     }
     tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
-    for tab, (nom, fig) in zip(tabs, figs.items()):
+    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
         with tab:
-            st.pyplot(fig, use_container_width=True)
+            st.image(png_bytes, use_container_width=True)
             from modules.m08_export import exporter_figure
             c1, c2 = st.columns(2)
-            c1.download_button("⬇️ PNG", exporter_figure(fig,"png"),
+            c1.download_button("⬇️ PNG", exporter_figure(png_bytes,"png"),
                 f"m06_{nom}.png","image/png", key=f"png6_{nom}")
-            c2.download_button("⬇️ SVG", exporter_figure(fig,"svg"),
+            c2.download_button("⬇️ SVG", exporter_figure(png_bytes,"svg"),
                 f"m06_{nom}.svg","image/svg+xml", key=f"svg6_{nom}")
 
     if df_reg is not None and not df_reg.empty:

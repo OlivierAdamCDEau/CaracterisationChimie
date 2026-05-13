@@ -2,7 +2,8 @@
 pages/5_Variabilite_temporelle.py — Variabilité temporelle (M05)
 Options réservées aux rôles admin/collaborateur.
 """
-import streamlit as st, sys
+import streamlit as st, sys, io
+import matplotlib.pyplot as plt
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 st.set_page_config(page_title="Variabilité temporelle", page_icon="📈", layout="wide")
@@ -40,7 +41,6 @@ n_colonnes       = 4
 n_params_max     = 18
 afficher_lissage = True
 afficher_ic      = True
-params_choisis   = None   # None = tous
 
 if peut_configurer:
     with st.expander("⚙️ Options", expanded=False):
@@ -49,65 +49,25 @@ if peut_configurer:
             format_func=lambda x: {"mediane":"Médiane","moyenne":"Moyenne"}[x])
         n_colonnes       = c2.slider("Colonnes", 2, 5, 4)
         n_params_max     = c3.slider("N paramètres max", 6, 30, 18)
-        afficher_lissage    = c4.toggle("Lissage séries", True)
-        afficher_ic         = c5.toggle("Bande IC saisonnalité", True)
-        labels_complets_x   = st.toggle(
-            "Noms complets des stations sur l'axe X (boxplots)",
-            False,
-            help="Si activé, les noms de stations ne sont pas tronqués.",
-        )
-
-        # Sélection des paramètres à analyser
-        if df_clean is not None and "CdParametre" in df_clean.columns:
-            params_dispo = sorted(df_clean["CdParametre"].dropna().unique().tolist())
-            lb_map_disp  = st.session_state.get("lb_map", {})
-            params_choisis_raw = st.multiselect(
-                "Paramètres à analyser (laisser vide = tous)",
-                options=params_dispo,
-                default=[],
-                format_func=lambda x: f"{lb_map_disp.get(x, x)} ({x})",
-                key="m05_params_sel",
-            )
-            params_choisis = params_choisis_raw if params_choisis_raw else None
-
-        # Sélection des stations à afficher
-        if df_clean is not None and "CdStationMesureEauxSurface" in df_clean.columns:
-            stations_dispo_m05 = sorted(df_clean["CdStationMesureEauxSurface"].dropna().unique().tolist())
-            lb_st_disp = st.session_state.get("lb_stations", {})
-            stations_choisies_raw = st.multiselect(
-                "Stations à afficher (laisser vide = toutes)",
-                options=stations_dispo_m05,
-                default=[],
-                format_func=lambda x: f"{lb_st_disp.get(x, x)} ({x})",
-                key="m05_stations_sel",
-            )
-            if stations_choisies_raw:
-                lb_stations = {k: v for k, v in lb_stations.items() if k in stations_choisies_raw}
+        afficher_lissage = c4.toggle("Lissage séries", True)
+        afficher_ic      = c5.toggle("Bande IC saisonnalité", True)
 
 # ── Calcul ────────────────────────────────────────────────────────────────────
 if st.button("🔬 Calculer la variabilité temporelle", type="primary",
              use_container_width=True, disabled=(df_clean is None)):
     with st.spinner("Calcul en cours…"):
         try:
-            # Filtrer df_clean sur les stations sélectionnées si nécessaire
-            _df_calc = df_clean
-            if lb_stations and set(lb_stations.keys()) < set(df_clean["CdStationMesureEauxSurface"].unique()):
-                _df_calc = df_clean[df_clean["CdStationMesureEauxSurface"].isin(lb_stations.keys())]
-
             figs, alertes = figure_variabilite_complete(
-                _df_calc, lb_map,
+                df_clean, lb_map,
                 df_seuils=df_seuils,
-                params_selectionnes=params_choisis,
-                ordre_stations=st.session_state.get("ordre_stations"),
                 lb_stations=lb_stations,
                 statistique_saison=statistique,
                 n_colonnes=n_colonnes,
                 n_params_max=n_params_max,
                 afficher_lissage=afficher_lissage,
                 afficher_ic=afficher_ic,
-                labels_complets_x=labels_complets_x,
             )
-            import io, matplotlib.pyplot as plt
+            # Convertir en bytes PNG avant stockage → survit à la nav entre pages
             figs_bytes = {}
             for _nom, _fig in figs.items():
                 _buf = io.BytesIO()
@@ -128,17 +88,39 @@ if st.button("🔬 Calculer la variabilité temporelle", type="primary",
 # ── Affichage ─────────────────────────────────────────────────────────────────
 figs_bytes = st.session_state.get("figs_m05")
 if figs_bytes:
+    figs = figs_bytes   # alias pour compatibilité
     TITRES = {
         "boxplots": "Distributions",
         "series":   "Séries temporelles",
         "saison":   "Profils saisonniers",
     }
-    tabs = st.tabs([TITRES.get(k, k) for k in figs_bytes.keys()])
-    for tab, (nom, png_bytes) in zip(tabs, figs_bytes.items()):
+    tabs = st.tabs([TITRES.get(k, k) for k in figs.keys()])
+    for tab, (nom, png_bytes) in zip(tabs, figs.items()):
         with tab:
             st.image(png_bytes, use_container_width=True)
-            st.download_button("⬇️ PNG", png_bytes,
-                f"m05_{nom}.png", "image/png", key=f"png5_{nom}")
+
+            # Légende stations sous la figure
+            lb_stations = st.session_state.get("lb_stations", {})
+            if lb_stations:
+                PALETTE = ["#2563eb","#16a34a","#dc2626","#d97706",
+                           "#7c3aed","#0891b2","#be185d","#4d7c0f"]
+                stations = list(lb_stations.items())
+                cols_leg = st.columns(min(len(stations), 4))
+                for i, (cd, lb) in enumerate(stations):
+                    couleur = PALETTE[i % len(PALETTE)]
+                    cols_leg[i % len(cols_leg)].markdown(
+                        f"<span style='display:inline-block;width:12px;height:12px;"
+                        f"background:{couleur};border-radius:2px;margin-right:6px;'></span>"
+                        f"<small>{lb.strip()}</small>",
+                        unsafe_allow_html=True,
+                    )
+
+            from modules.m08_export import exporter_figure
+            c1, c2 = st.columns(2)
+            c1.download_button("⬇️ PNG", exporter_figure(png_bytes,"png"),
+                f"m05_{nom}.png","image/png", key=f"png5_{nom}")
+            c2.download_button("⬇️ SVG", exporter_figure(png_bytes,"svg"),
+                f"m05_{nom}.svg","image/svg+xml", key=f"svg5_{nom}")
 
 st.markdown("---")
 st.markdown('<div style="text-align:right;color:#999;font-size:0.8em;">@CDEau</div>', unsafe_allow_html=True)
