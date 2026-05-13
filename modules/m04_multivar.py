@@ -463,6 +463,7 @@ def biplot_acp(
     echelle_vecteur: float = 1.0,
     label_offset: float = 0.055,
     labels_complets: bool = False,
+    biplot_separe: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Biplot stations / paramètres",
@@ -680,6 +681,46 @@ def biplot_acp(
         )
     # Si pas de familles : panneau légende vide mais conservé pour l'espacement
 
+    # ── Mode biplot séparé : générer une figure stations et une figure params ──
+    if biplot_separe:
+        # Figure stations seulement
+        fig_st, ax_st = plt.subplots(figsize=(7, 6), dpi=dpi)
+        for i, (s_xi, s_yi, label_si, col_si) in enumerate(pts_stations):
+            ax_st.scatter(s_xi, s_yi, color=col_si, s=80, zorder=5)
+        _placer_labels_biplot(
+            ax_st,
+            [(x, y) for x, y, _, _ in pts_stations],
+            [lbl for _, _, lbl, _ in pts_stations],
+            [col for _, _, _, col in pts_stations],
+            fontsize=9, marge=label_offset * 1.5,
+        )
+        ax_st.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_st.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_st.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
+        ax_st.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_st.set_title("ACP — Stations", fontsize=10, fontweight="bold")
+        _ajouter_watermark(fig_st, ax=ax_st)
+        fig_st.tight_layout()
+
+        # Figure paramètres seulement
+        fig_pm, ax_pm = plt.subplots(figsize=(7, 6), dpi=dpi)
+        for (vx, vy), lv, cv in zip(vecteurs_xy, labels_vecteurs, couleurs_vecteurs):
+            ax_pm.annotate("", xy=(vx, vy), xytext=(0, 0),
+                arrowprops=dict(arrowstyle="-|>", color=cv, lw=1.2))
+        _placer_labels_biplot(ax_pm, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
+                              fontsize=8, marge=label_offset)
+        ax_pm.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_pm.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
+        lim = max(abs(v) for xy in vecteurs_xy for v in xy) * 1.3 or 1
+        ax_pm.set_xlim(-lim, lim); ax_pm.set_ylim(-lim, lim)
+        ax_pm.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
+        ax_pm.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_pm.set_title("ACP — Paramètres (loadings)", fontsize=10, fontweight="bold")
+        _ajouter_watermark(fig_pm, ax=ax_pm)
+        fig_pm.tight_layout()
+
+        return fig, alertes, fig_st, fig_pm
+
     _ajouter_watermark(fig, ax=ax_leg)
     return fig, alertes
 
@@ -879,6 +920,46 @@ def biplot_double_projection(
         )
 
     fig.suptitle(titre, fontsize=11, fontweight="bold")
+    # ── Mode biplot séparé : générer une figure stations et une figure params ──
+    if biplot_separe:
+        # Figure stations seulement
+        fig_st, ax_st = plt.subplots(figsize=(7, 6), dpi=dpi)
+        for i, (s_xi, s_yi, label_si, col_si) in enumerate(pts_stations):
+            ax_st.scatter(s_xi, s_yi, color=col_si, s=80, zorder=5)
+        _placer_labels_biplot(
+            ax_st,
+            [(x, y) for x, y, _, _ in pts_stations],
+            [lbl for _, _, lbl, _ in pts_stations],
+            [col for _, _, _, col in pts_stations],
+            fontsize=9, marge=label_offset * 1.5,
+        )
+        ax_st.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_st.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_st.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
+        ax_st.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_st.set_title("ACP — Stations", fontsize=10, fontweight="bold")
+        _ajouter_watermark(fig_st, ax=ax_st)
+        fig_st.tight_layout()
+
+        # Figure paramètres seulement
+        fig_pm, ax_pm = plt.subplots(figsize=(7, 6), dpi=dpi)
+        for (vx, vy), lv, cv in zip(vecteurs_xy, labels_vecteurs, couleurs_vecteurs):
+            ax_pm.annotate("", xy=(vx, vy), xytext=(0, 0),
+                arrowprops=dict(arrowstyle="-|>", color=cv, lw=1.2))
+        _placer_labels_biplot(ax_pm, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
+                              fontsize=8, marge=label_offset)
+        ax_pm.axhline(0, color="#cbd5e1", lw=0.8, ls="--")
+        ax_pm.axvline(0, color="#cbd5e1", lw=0.8, ls="--")
+        lim = max(abs(v) for xy in vecteurs_xy for v in xy) * 1.3 or 1
+        ax_pm.set_xlim(-lim, lim); ax_pm.set_ylim(-lim, lim)
+        ax_pm.set_xlabel(f"CP1 ({var_exp[0]:.1f}%)", fontsize=9)
+        ax_pm.set_ylabel(f"CP2 ({var_exp[1]:.1f}%)", fontsize=9)
+        ax_pm.set_title("ACP — Paramètres (loadings)", fontsize=10, fontweight="bold")
+        _ajouter_watermark(fig_pm, ax=ax_pm)
+        fig_pm.tight_layout()
+
+        return fig, alertes, fig_st, fig_pm
+
     _ajouter_watermark(fig, ax=ax_leg)
     return fig, alertes
 
@@ -1178,6 +1259,7 @@ def figure_multivar_complete(
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
     label_offset: float = 0.055,
+    biplot_separe: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     n_clusters: int = 0,
@@ -1212,17 +1294,25 @@ def figure_multivar_complete(
     figures = {}
 
     # Biplot individuel
-    fig, msgs = biplot_acp(
+    res_biplot = biplot_acp(
         pivot_norm, lb_map,
         fam_map=fam_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
         label_offset=label_offset,
         labels_complets=corr_labels_complets,
+        biplot_separe=biplot_separe,
         corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
         titre=f"{titre_global} — Biplot", dpi=dpi,
     )
-    figures["biplot"] = fig
+    if biplot_separe and len(res_biplot) == 4:
+        fig, msgs, fig_st, fig_pm = res_biplot
+        figures["biplot"]          = fig      # biplot complet
+        figures["biplot_stations"] = fig_st   # stations seules
+        figures["biplot_params"]   = fig_pm   # paramètres seuls
+    else:
+        fig, msgs = res_biplot[0], res_biplot[1]
+        figures["biplot"] = fig
     alertes.extend(msgs)
 
     # Double projection si familles disponibles
@@ -1240,7 +1330,7 @@ def figure_multivar_complete(
         alertes.extend(msgs)
 
     # Dendrogramme
-    fig, msgs, clusters = dendrogramme_stations(
+    fig, msgs, clusters, n_clusters_suggere = dendrogramme_stations(
         pivot_norm,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode_linkage=methode_linkage, n_clusters=n_clusters,

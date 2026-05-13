@@ -43,12 +43,14 @@ peut_configurer = verifier_droit("config")
 
 # ── Options ───────────────────────────────────────────────────────────────────
 n_vecteurs          = 10
+n_clusters          = 0
 corpus_commun       = False
 seuil_imputation    = 0.20
 methode_linkage     = "ward"
 echelle_vecteur     = 1.0
 label_offset        = 0.06
 corr_labels_complets = False
+biplot_separe       = False
 
 if peut_configurer:
     with st.expander("⚙️ Options", expanded=False):
@@ -61,8 +63,16 @@ if peut_configurer:
         methode_linkage  = c4.selectbox("Méthode clustering", ["ward","complete","average"],
             format_func=lambda x: {"ward":"Ward (défaut)","complete":"Complet","average":"Moyen"}[x])
 
-        st.markdown("**Biplot ACP — étiquettes**")
-        c5, c6, c7 = st.columns(3)
+        st.markdown("**Dendrogramme**")
+        n_clusters = st.slider(
+            "N groupes à délimiter (0 = automatique)",
+            min_value=0, max_value=10, value=0, step=1,
+            help="0 = pas de coupure forcée, le dendrogramme suggère le nombre optimal. "
+                 "Sinon, force la coupure à N groupes et les colorie.",
+        )
+
+        st.markdown("**Biplot ACP — étiquettes et projection**")
+        c5, c6, c7, c8 = st.columns(4)
         echelle_vecteur = c5.slider(
             "Longueur des vecteurs", 0.5, 2.0, 1.0, 0.05,
             help="Facteur d'échelle des flèches de loading.",
@@ -74,6 +84,11 @@ if peut_configurer:
         corr_labels_complets = c7.toggle(
             "Libellés complets (heatmap + biplots)", False,
             help="Affiche les libellés entiers plutôt que tronqués.",
+        )
+        biplot_separe = c8.toggle(
+            "Biplots séparés stations / paramètres", False,
+            help="Génère en plus deux figures séparées : une avec les stations seules, "
+                 "une avec les paramètres seuls. Utile quand les données sont denses.",
         )
 
 # ── Calcul ────────────────────────────────────────────────────────────────────
@@ -93,8 +108,10 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
                 n_vecteurs=n_vecteurs,
                 echelle_vecteur=echelle_vecteur,
                 label_offset=label_offset,
+                biplot_separe=biplot_separe,
                 corpus_commun=corpus_commun,
                 seuil_imputation=seuil_imputation,
+                n_clusters=n_clusters,
                 methode_linkage=methode_linkage,
                 corr_labels_complets=corr_labels_complets,
             )
@@ -128,11 +145,13 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
 figs_bytes = st.session_state.get("figs_m04")
 if figs_bytes:
     TITRES = {
-        "biplot":     "Biplot ACP — paramètres individuels",
-        "biplot_fam": "Double projection — familles",
-        "dendro":     "Dendrogramme — clustering",
-        "corr":       "Matrice de corrélations",
-        "scree":      "Éboulis des valeurs propres",
+        "biplot":          "Biplot ACP — complet",
+        "biplot_stations": "ACP — Stations seules",
+        "biplot_params":   "ACP — Paramètres seuls",
+        "biplot_fam":      "Double projection — familles",
+        "dendro":          "Dendrogramme — clustering",
+        "corr":            "Matrice de corrélations",
+        "scree":           "Éboulis des valeurs propres",
     }
 
     # Légende couleurs stations
