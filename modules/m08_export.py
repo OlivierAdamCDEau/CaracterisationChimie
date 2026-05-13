@@ -83,24 +83,16 @@ _BORDER_THIN = Border(
 # ---------------------------------------------------------------------------
 
 def exporter_figure(
-    fig: plt.Figure,
+    fig,
     format: str = "png",
     dpi: int = 200,
 ) -> bytes:
     """
-    Retourne les bytes d'une figure matplotlib au format PNG ou SVG.
-    Prêt pour st.download_button() dans Streamlit.
-
-    Parameters
-    ----------
-    fig    : figure matplotlib
-    format : "png" ou "svg"
-    dpi    : résolution (ignoré pour SVG)
-
-    Returns
-    -------
-    bytes
+    Retourne les bytes d'une figure au format PNG ou SVG.
+    Accepte un objet plt.Figure OU des bytes PNG déjà produits.
     """
+    if isinstance(fig, (bytes, bytearray)):
+        return bytes(fig)
     buf = io.BytesIO()
     if format.lower() == "svg":
         fig.savefig(buf, format="svg", bbox_inches="tight")
@@ -968,9 +960,10 @@ def generer_zip(
         for nom, fig in figures.items():
             nom_base = f"{nom_projet}_{nom}_{date_str}"
             png_bytes = exporter_figure(fig, format="png", dpi=200)
-            svg_bytes = exporter_figure(fig, format="svg")
             zf.writestr(f"figures/{nom_base}.png", png_bytes)
-            zf.writestr(f"figures/{nom_base}.svg", svg_bytes)
+            if not isinstance(fig, (bytes, bytearray)):
+                svg_bytes = exporter_figure(fig, format="svg")
+                zf.writestr(f"figures/{nom_base}.svg", svg_bytes)
 
         # Fichiers Excel
         for nom, xlsx_bytes in excels.items():

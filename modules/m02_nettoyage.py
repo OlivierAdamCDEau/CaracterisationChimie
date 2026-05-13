@@ -286,13 +286,19 @@ def pivoter_par_famille(df, df_familles=None, params_retenus=None,
     return pivot_fam, alertes
 
 
-def normaliser(pivot, methode="log_zscore"):
+def normaliser(pivot, methode="log_zscore", imputer=True):
+    """
+    imputer=True  : comportement par défaut — remplace NaN par la médiane.
+    imputer=False : conserve les NaN (pour corpus_commun en aval).
+    """
     alertes = []
     df = pivot.copy().astype(float)
     nb_nan = df.isna().sum().sum()
-    if nb_nan:
+    if nb_nan and imputer:
         df = df.fillna(df.median())
         alertes.append(f"ℹ️ {nb_nan} cellule(s) vide(s) imputée(s) par médiane de colonne.")
+    elif nb_nan and not imputer:
+        alertes.append(f"ℹ️ {nb_nan} cellule(s) vide(s) conservées (mode corpus commun).")
 
     if methode in ("log_zscore", "zscore"):
         if methode == "log_zscore":
@@ -348,12 +354,14 @@ def nettoyer_et_pivoter(df_filtre, df_familles=None,
         params_retenus=params_retenus, niveau_famille=niveau_famille)
     alertes.extend(msgs)
 
-    pivot_norm, msgs = normaliser(pivot, methode=normalisation)
+    pivot_norm, msgs = normaliser(pivot, methode=normalisation, imputer=True)
     alertes.extend(msgs)
+    # Version avec NaN préservés pour corpus_commun (paramètres communs à toutes stations)
+    pivot_norm_raw, _ = normaliser(pivot, methode=normalisation, imputer=False)
 
     pivot_fam_norm = pd.DataFrame()
     if not pivot_familles.empty:
-        pivot_fam_norm, msgs = normaliser(pivot_familles, methode=normalisation)
+        pivot_fam_norm, msgs = normaliser(pivot_familles, methode=normalisation, imputer=True)
         alertes.extend(msgs)
 
     return {
@@ -361,7 +369,8 @@ def nettoyer_et_pivoter(df_filtre, df_familles=None,
         "params_retenus": params_retenus,
         "pivot": pivot, "pivot_labels": pivot_labels, "lb_map": lb_map,
         "pivot_familles": pivot_familles,
-        "pivot_norm": pivot_norm, "pivot_fam_norm": pivot_fam_norm,
+        "pivot_norm": pivot_norm, "pivot_norm_raw": pivot_norm_raw,
+        "pivot_fam_norm": pivot_fam_norm,
         "alertes": alertes,
     }
 

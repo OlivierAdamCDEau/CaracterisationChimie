@@ -161,6 +161,7 @@ if st.button(btn_label, type="primary", use_container_width=True, disabled=(df_f
             st.session_state.update({
                 "df_clean": res["df_clean"], "df_stats": res["df_stats"],
                 "pivot": res["pivot"], "pivot_norm": res["pivot_norm"],
+                "pivot_norm_raw": res.get("pivot_norm_raw", res["pivot_norm"]),
                 "pivot_fam_norm": res["pivot_fam_norm"], "pivot_classes": pivot_classes,
                 "lb_map": res["lb_map"], "fam_map": fam_map,
                 "df_ref": df_ref, "df_seuils": df_seuils,

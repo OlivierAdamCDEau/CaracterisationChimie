@@ -29,6 +29,7 @@ except ImportError as e:
     st.error(f"❌ {e}"); st.stop()
 
 pivot_norm     = st.session_state.get("pivot_norm")
+pivot_norm_raw = st.session_state.get("pivot_norm_raw", pivot_norm)
 pivot_fam_norm = st.session_state.get("pivot_fam_norm")
 lb_map         = st.session_state.get("lb_map", {})
 lb_stations    = st.session_state.get("lb_stations", {})
@@ -80,8 +81,11 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
              use_container_width=True, disabled=(pivot_norm is None)):
     with st.spinner("Calcul en cours…"):
         try:
+            # corpus_commun : utiliser pivot_norm_raw (NaN préservés)
+            # pour que _prepare_pivot puisse identifier les paramètres communs
+            pivot_input = pivot_norm_raw if corpus_commun else pivot_norm
             figs, alertes = figure_multivar_complete(
-                pivot_norm, lb_map,
+                pivot_input, lb_map,
                 pivot_fam_norm=pivot_fam_norm,
                 fam_map=fam_map if fam_map else None,
                 lb_stations=lb_stations,
