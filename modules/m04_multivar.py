@@ -1241,6 +1241,7 @@ def figure_multivar_complete(
         pivot_norm,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode_linkage=methode_linkage, n_clusters=n_clusters,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Clustering", dpi=dpi,
     )
     figures["dendro"] = fig
@@ -1251,6 +1252,8 @@ def figure_multivar_complete(
         pivot_norm, lb_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         methode=methode_corr,
+        labels_complets=corr_labels_complets,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Corrélations ({methode_corr})", dpi=dpi,
     )
     figures["corr"] = fig
@@ -1260,6 +1263,7 @@ def figure_multivar_complete(
     fig, msgs = scree_plot(
         pivot_norm,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
+        corpus_commun=corpus_commun,
         titre=f"{titre_global} — Éboulis des valeurs propres", dpi=dpi,
     )
     figures["scree"] = fig
