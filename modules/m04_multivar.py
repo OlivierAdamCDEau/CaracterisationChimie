@@ -319,6 +319,7 @@ def _placer_labels_biplot(
     couleurs: list[str],
     positions_points: list[tuple[float, float]] | None = None,
     fontsize: int = 8,
+    marge: float = 0.055,
 ) -> None:
     """
     Place les labels des vecteurs sans superposition, style QGIS :
@@ -341,7 +342,7 @@ def _placer_labels_biplot(
     # Emprise d'un label en unités data (approximation)
     lw = fontsize * 0.007 * rx
     lh = fontsize * 0.016 * ry
-    marge = 0.055   # décalage de base depuis la pointe (fraction de plage)
+    # marge : paramètre de la fonction (défaut 0.055)
 
     # 8 positions candidates (angle, fraction_x, fraction_y)
     CANDIDATS = [
@@ -460,11 +461,13 @@ def biplot_acp(
     axe_y: int = 1,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    label_offset: float = 0.055,
+    labels_complets: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Biplot stations / paramètres",
-    figsize: tuple = (11, 9),
-    dpi: int = 150,
+    figsize: tuple = (9, 8),
+    dpi: int = 130,
 ) -> tuple[plt.Figure, list]:
     """
     Biplot ACP : projection des stations (points) et des paramètres (vecteurs).
@@ -560,15 +563,12 @@ def biplot_acp(
             linewidths=1.8 if est_impute else 0.6,
             marker="o",
         )
-        lb_st = _nom_court_station(lb_stations.get(station, station)) if lb_stations else str(station)
-        # Suffixe taux si imputation notable
+        if labels_complets:
+            lb_st = lb_stations.get(station, station) if lb_stations else str(station)
+        else:
+            lb_st = _nom_court_station(lb_stations.get(station, station)) if lb_stations else str(station)
         label_st = f"{lb_st} ({taux_st:.0%}*)" if est_impute else lb_st
-        ax.annotate(
-            label_st, (s_x[i], s_y[i]),
-            textcoords="offset points", xytext=(6, 5),
-            fontsize=8, color=_couleur_station(i), fontweight="bold", zorder=6,
-        )
-        pts_stations.append((s_x[i], s_y[i]))
+        pts_stations.append((s_x[i], s_y[i], label_st, _couleur_station(i)))
 
     # --- Vecteurs paramètres (loadings) : flèches d'abord ---
     vecteurs_xy = []
@@ -611,10 +611,18 @@ def biplot_acp(
     # Forcer le rendu pour que get_xlim/ylim soient stables avant la répulsion
     fig.canvas.draw()
 
-    # --- Labels avec répulsion itérative ---
+    # --- Labels vecteurs avec répulsion itérative ---
+    pts_xy = [(x, y) for x, y, _, _ in pts_stations]
     _placer_labels_biplot(
         ax, vecteurs_xy, labels_vecteurs, couleurs_vecteurs,
-        fontsize=8,
+        positions_points=pts_xy, fontsize=8, marge=label_offset,
+    )
+    # --- Labels stations avec répulsion ---
+    _placer_labels_biplot(
+        ax, pts_xy,
+        [lbl for _, _, lbl, _ in pts_stations],
+        [col for _, _, _, col in pts_stations],
+        positions_points=vecteurs_xy, fontsize=9, marge=label_offset * 1.2,
     )
 
     # --- Légendes en dessous de la figure ---
@@ -1013,7 +1021,7 @@ def matrice_correlations(
     """
     alertes = []
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_params=3)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, min_params=3, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes
@@ -1026,7 +1034,16 @@ def matrice_correlations(
 
     n = len(corr)
     codes = list(corr.columns)
-    labels = [_lb_court_avec_ref(c, lb_map) for c in codes]
+    # Taille adaptée au nombre de paramètres
+    base = max(8, min(20, n * 0.55))
+    figsize = (base, base)
+    if labels_complets:
+        labels = [lb_map.get(code, str(code)) for code in codes]
+        max_len = max((len(l) for l in labels), default=10)
+        extra = max(0, (max_len - 18) * 0.05)
+        figsize = (figsize[0] + extra, figsize[1] + extra * 0.7)
+    else:
+        labels = [_lb_court_avec_ref(c, lb_map) for c in codes]
 
     # Palette divergente bleu–blanc–rouge
     cmap = plt.cm.RdBu_r
@@ -1052,8 +1069,10 @@ def matrice_correlations(
     # Axes
     ax.set_xticks(range(n))
     ax.set_yticks(range(n))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=max(7, min(9, 80 // n)))
-    ax.set_yticklabels(labels, fontsize=max(7, min(9, 80 // n)))
+    _rot = 60 if labels_complets else 45
+    _fs  = max(6, min(9, 80 // n))
+    ax.set_xticklabels(labels, rotation=_rot, ha="right", fontsize=_fs)
+    ax.set_yticklabels(labels, fontsize=_fs)
 
     # Colorbar
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -1083,6 +1102,7 @@ def scree_plot(
     ordre_stations: Optional[list] = None,
     lb_stations: Optional[dict] = None,
     n_composantes: int = 10,
+    corpus_commun: bool = False,
     titre: str = "Éboulis des valeurs propres (Scree plot)",
     figsize: tuple = (8, 5),
     dpi: int = 150,
@@ -1094,7 +1114,7 @@ def scree_plot(
     """
     alertes = []
 
-    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations)
+    df, msgs, _ = _prepare_pivot(pivot_norm, ordre_stations, lb_stations, corpus_commun=corpus_commun)
     alertes.extend(msgs)
     if df.empty:
         return plt.figure(), alertes
@@ -1107,6 +1127,7 @@ def scree_plot(
     cum_var = np.cumsum(var)
     comp_labels = [f"PC{i + 1}" for i in range(n_comp)]
 
+    figsize = (max(7, min(14, n_comp * 0.9 + 2)), 5)
     fig, ax1 = plt.subplots(figsize=figsize, dpi=dpi)
     ax2 = ax1.twinx()
 
