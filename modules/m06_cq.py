@@ -536,12 +536,23 @@ def regression_cq(
     groupes = df_cq.groupby(["CdStation", "CdParametre"])
 
     for (station, code), grp in groupes:
+        # Lire lb_station depuis grp (non filtré) — data peut être vide
+        lb_station = (
+            grp["LbStation"].iloc[0]
+            if "LbStation" in grp.columns and not grp.empty
+            else str(station)
+        )
+        source_debit = (
+            grp["Source_debit"].iloc[0]
+            if "Source_debit" in grp.columns and not grp.empty
+            else "?"
+        )
+
         # Valeurs strictement positives uniquement
         masque = (grp["Concentration"] > 0) & (grp["Debit_m3s"] > 0)
         data = grp[masque].dropna(subset=["Concentration", "Debit_m3s"])
 
         n = len(data)
-        lb_station = data["LbStation"].iloc[0] if "LbStation" in data.columns else str(station)
 
         if n < n_min:
             resultats.append({
@@ -549,7 +560,7 @@ def regression_cq(
                 "CdParametre": code, "n_paires": n,
                 "a": np.nan, "b": np.nan, "r2": np.nan,
                 "p_value": np.nan, "Comportement": "ND",
-                "Source_debit": data["Source_debit"].iloc[0] if not data.empty else "?",
+                "Source_debit": source_debit,
             })
             continue
 
@@ -574,7 +585,7 @@ def regression_cq(
             "r2":           round(r2, 4),
             "p_value":      round(p_value, 6),
             "Comportement": comportement,
-            "Source_debit": data["Source_debit"].iloc[0],
+            "Source_debit": source_debit,
         })
 
     df_reg = pd.DataFrame(resultats)
