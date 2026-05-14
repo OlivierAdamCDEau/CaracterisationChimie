@@ -1404,7 +1404,7 @@ def figure_multivar_complete(
 
     # Double projection si familles disponibles
     if pivot_fam_norm is not None and not pivot_fam_norm.empty:
-        fig, msgs = biplot_double_projection(
+        res_dbl = biplot_double_projection(
             pivot_norm, pivot_fam_norm, lb_map,
             fam_map=fam_map,
             ordre_stations=ordre_stations, lb_stations=lb_stations,
@@ -1415,7 +1415,14 @@ def figure_multivar_complete(
             corpus_commun=corpus_commun, seuil_imputation=seuil_imputation,
             titre=f"{titre_global} — Double projection", dpi=dpi,
         )
-        figures["biplot_fam"] = fig
+        if biplot_separe and len(res_dbl) == 4:
+            fig, msgs, fig_st, fig_pm = res_dbl
+            figures["biplot_fam"]          = fig
+            figures["biplot_fam_stations"] = fig_st
+            figures["biplot_fam_params"]   = fig_pm
+        else:
+            fig, msgs = res_dbl[0], res_dbl[1]
+            figures["biplot_fam"] = fig
         alertes.extend(msgs)
 
     # Dendrogramme
