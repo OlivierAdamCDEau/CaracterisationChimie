@@ -848,10 +848,21 @@ def generer_rapport_pdf(
         story.append(Paragraph("Paramétrage et filtres appliqués", st_titre_section))
         data_cfg = [[Paragraph("Paramètre", st_garde_th),
                      Paragraph("Valeur", st_garde_th)]]
+        def _safe_para(text, style):
+            """Échappe les caractères XML spéciaux pour ReportLab Paragraph."""
+            safe = (str(text)
+                    .replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;"))
+            # Tronquer si trop long
+            if len(safe) > 200:
+                safe = safe[:197] + "…"
+            return Paragraph(safe, style)
+
         for k, v in parametrage.items():
             data_cfg.append([
-                Paragraph(str(k), st_garde_td),
-                Paragraph(str(v), st_garde_td),
+                _safe_para(k, st_garde_td),
+                _safe_para(v, st_garde_td),
             ])
         t_cfg = Table(data_cfg, colWidths=[6 * cm, 10 * cm], hAlign="CENTER")
         t_cfg.setStyle(TableStyle([
@@ -903,11 +914,11 @@ def generer_rapport_pdf(
             if isinstance(fig, dict):
                 img_buf.write(fig.get("png", b""))
                 img_w = w_utile
-                img_h = w_utile * 0.75
+                img_h = min(w_utile * 0.75, w_utile * h_ratio)
             elif isinstance(fig, (bytes, bytearray)):
                 img_buf.write(bytes(fig))
                 img_w = w_utile
-                img_h = w_utile * 0.75
+                img_h = min(w_utile * 0.75, w_utile * h_ratio)
             else:
                 fig.savefig(img_buf, format="png", dpi=250, bbox_inches="tight")
                 fig_w_in, fig_h_in = fig.get_size_inches()
