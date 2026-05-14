@@ -40,6 +40,7 @@ try:
         filtrer_support_fraction, filtrer_stations,
         filtrer_periode, extraire_debit,
         inventaire_stations, detecter_format,
+        synthese_par_station,
     )
 except ImportError as e:
     st.error(f"❌ Module m01_import introuvable : {e}")
@@ -224,6 +225,25 @@ cd_fractions = st.multiselect(
 if not cd_fractions and not _fracs_valides.empty:
     st.warning("⚠️ Sélectionnez au moins une fraction.")
     st.stop()
+
+# ── Tableau de synthèse par station ──────────────────────────────────────────
+st.markdown("---")
+st.markdown("### Synthèse par station")
+st.caption(
+    "Calculé sur le support/fraction sélectionné. "
+    "Catégories : **PCH** = physico-chimie (mg/L), "
+    "**Métaux** = codes SANDRE métaux dissous, "
+    "**Micropoll.** = données en µg/L ou ng/L."
+)
+_df_synth, _ = filtrer_support_fraction(
+    df_brut, cd_support,
+    list(cd_fractions) if cd_fractions else None,
+)
+if not _df_synth.empty:
+    _lb_map_synth = st.session_state.get("lb_map", {})
+    _df_syn = synthese_par_station(_df_synth, lb_map=_lb_map_synth)
+    if not _df_syn.empty:
+        st.dataframe(_df_syn, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 3 — Filtres période + stations manuelles

@@ -874,11 +874,14 @@ def generer_rapport_pdf(
         # Figures — résolution 250 dpi
         for fig in figures_sec:
             img_buf = io.BytesIO()
-            if isinstance(fig, (bytes, bytearray)):
-                img_buf.write(bytes(fig))
-                # Dimensions inconnues pour bytes PNG — utiliser 100% de la largeur utile
+            if isinstance(fig, dict):
+                img_buf.write(fig.get("png", b""))
                 img_w = w_utile
-                img_h = w_utile * 0.75   # ratio 4:3 par défaut
+                img_h = w_utile * 0.75
+            elif isinstance(fig, (bytes, bytearray)):
+                img_buf.write(bytes(fig))
+                img_w = w_utile
+                img_h = w_utile * 0.75
             else:
                 fig.savefig(img_buf, format="png", dpi=250, bbox_inches="tight")
                 fig_w_in, fig_h_in = fig.get_size_inches()
@@ -959,11 +962,22 @@ def generer_zip(
         # Figures PNG + SVG
         for nom, fig in figures.items():
             nom_base = f"{nom_projet}_{nom}_{date_str}"
-            png_bytes = exporter_figure(fig, format="png", dpi=200)
-            zf.writestr(f"figures/{nom_base}.png", png_bytes)
-            if not isinstance(fig, (bytes, bytearray)):
-                svg_bytes = exporter_figure(fig, format="svg")
-                zf.writestr(f"figures/{nom_base}.svg", svg_bytes)
+            if isinstance(fig, dict):
+                png_data = fig.get("png", b"")
+                svg_data = fig.get("svg", b"")
+            elif isinstance(fig, (bytes, bytearray)):
+                png_data = bytes(fig)
+                svg_data = b""
+            else:
+                png_data = exporter_figure(fig, format="png", dpi=200)
+                try:
+                    svg_data = exporter_figure(fig, format="svg")
+                except Exception:
+                    svg_data = b""
+            if png_data:
+                zf.writestr(f"figures/{nom_base}.png", png_data)
+            if svg_data:
+                zf.writestr(f"figures/{nom_base}.svg", svg_data)
 
         # Fichiers Excel
         for nom, xlsx_bytes in excels.items():

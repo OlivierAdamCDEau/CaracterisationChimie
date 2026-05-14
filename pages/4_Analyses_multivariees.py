@@ -48,9 +48,11 @@ corpus_commun       = False
 seuil_imputation    = 0.20
 methode_linkage     = "ward"
 echelle_vecteur     = 1.0
-label_offset        = 0.06
+label_offset        = 0.032
 corr_labels_complets = False
 biplot_separe       = False
+axe_x               = 0
+axe_y               = 1
 
 if peut_configurer:
     with st.expander("⚙️ Options", expanded=False):
@@ -71,6 +73,49 @@ if peut_configurer:
                  "Sinon, force la coupure à N groupes et les colorie.",
         )
 
+        st.markdown("**Composantes principales à projeter**")
+        # Calculer dynamiquement les PC disponibles pour atteindre 80% d'explication
+        _pivot_for_pc = pivot_norm_raw if corpus_commun and pivot_norm_raw is not None else pivot_norm
+        _pc_options = [0, 1, 2, 3, 4]  # fallback
+        _pc_labels  = {i: f"PC{i+1}" for i in range(5)}
+        if _pivot_for_pc is not None:
+            try:
+                from sklearn.preprocessing import StandardScaler
+                from sklearn.decomposition import PCA as _PCA
+                _df_pc = _pivot_for_pc.dropna(axis=1, how="any").dropna(axis=0, how="any")
+                if not _df_pc.empty and _df_pc.shape[0] >= 3 and _df_pc.shape[1] >= 2:
+                    _pca_tmp = _PCA().fit(StandardScaler().fit_transform(_df_pc))
+                    _var_cum = _pca_tmp.explained_variance_ratio_.cumsum() * 100
+                    # Garder les PC jusqu'à atteindre 80% (min 2, max 5)
+                    _n_80 = max(2, min(5, int((_var_cum < 80).sum()) + 1))
+                    _pc_options = list(range(_n_80))
+                    _pc_labels  = {
+                        i: f"PC{i+1} ({_pca_tmp.explained_variance_ratio_[i]*100:.1f}%)"
+                        for i in _pc_options
+                    }
+                    st.caption(
+                        "PC disponibles pour projection (jusqu'à 80% cumulé) : "
+                        + ", ".join(f"PC{i+1}={_pca_tmp.explained_variance_ratio_[i]*100:.1f}%"
+                                    for i in _pc_options)
+                        + f" → cumulé {_var_cum[_pc_options[-1]]:.1f}%"
+                    )
+            except Exception:
+                pass
+        cp1, cp2 = st.columns(2)
+        axe_x = cp1.selectbox(
+            "Axe X (composante horizontale)", _pc_options,
+            format_func=lambda i: _pc_labels.get(i, f"PC{i+1}"), index=0,
+            key="biplot_axe_x",
+        )
+        axe_y = cp2.selectbox(
+            "Axe Y (composante verticale)", _pc_options,
+            format_func=lambda i: _pc_labels.get(i, f"PC{i+1}"), index=min(1, len(_pc_options)-1),
+            key="biplot_axe_y",
+        )
+        if axe_x == axe_y:
+            st.warning("⚠️ Sélectionnez deux composantes différentes.")
+            axe_x, axe_y = 0, 1
+
         st.markdown("**Biplot ACP — étiquettes et projection**")
         c5, c6, c7, c8 = st.columns(4)
         echelle_vecteur = c5.slider(
@@ -78,7 +123,7 @@ if peut_configurer:
             help="Facteur d'échelle des flèches de loading.",
         )
         label_offset = c6.slider(
-            "Écartement étiquettes", 0.03, 0.20, 0.06, 0.01,
+            "Écartement étiquettes", 0.01, 0.15, 0.032, 0.005,
             help="Distance entre la pointe du vecteur et son étiquette.",
         )
         corr_labels_complets = c7.toggle(
@@ -107,6 +152,7 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
                 ordre_stations=st.session_state.get("ordre_stations"),
                 n_vecteurs=n_vecteurs,
                 echelle_vecteur=echelle_vecteur,
+                axe_x=axe_x, axe_y=axe_y,
                 label_offset=label_offset,
                 biplot_separe=biplot_separe,
                 corpus_commun=corpus_commun,
@@ -152,13 +198,15 @@ if st.button("🔬 Calculer les analyses multivariées", type="primary",
 figs_bytes = st.session_state.get("figs_m04")
 if figs_bytes:
     TITRES = {
-        "biplot":          "Biplot ACP — complet",
-        "biplot_stations": "ACP — Stations seules",
-        "biplot_params":   "ACP — Paramètres seuls",
-        "biplot_fam":      "Double projection — familles",
-        "dendro":          "Dendrogramme — clustering",
-        "corr":            "Matrice de corrélations",
-        "scree":           "Éboulis des valeurs propres",
+        "biplot":              "Biplot ACP — complet",
+        "biplot_stations":     "ACP — Stations seules",
+        "biplot_params":       "ACP — Paramètres seuls",
+        "biplot_fam":          "Double projection — familles",
+        "biplot_fam_stations": "Double proj. — Stations seules",
+        "biplot_fam_params":   "Double proj. — Paramètres seuls",
+        "dendro":              "Dendrogramme — clustering",
+        "corr":                "Matrice de corrélations",
+        "scree":               "Éboulis des valeurs propres",
     }
 
     # Légende couleurs stations

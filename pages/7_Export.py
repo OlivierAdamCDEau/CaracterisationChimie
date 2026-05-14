@@ -35,6 +35,8 @@ toutes_figs = {}
 for cle, prefix in [("figs_m03","m03"), ("figs_m04","m04"), ("figs_m05","m05"), ("figs_m06","m06")]:
     figs = st.session_state.get(cle) or {}
     for nom, fig in figs.items():
+        # Les figures sont stockées sous forme dict {"png":..., "svg":...}
+        # On conserve le dict complet pour l'export (PNG+SVG) et l'affichage
         toutes_figs[f"{prefix}_{nom}"] = fig
 
 lb_map      = st.session_state.get("lb_map", {})
@@ -139,6 +141,8 @@ if st.button("📄 Générer le rapport PDF", type="primary", disabled=(not tout
             }
             sections = []
             for titre_sec, (cle, paysage) in GROUPES.items():
+                # Les valeurs sont des dicts {"png":..., "svg":...} — les passer tels quels
+                # generer_rapport_pdf sait maintenant gérer ce format
                 figs_sec = list((st.session_state.get(cle) or {}).values())
                 if figs_sec:
                     tableau = None
@@ -186,6 +190,8 @@ if st.button("📦 Générer le bundle ZIP", disabled=(not toutes_figs)):
             }
             sections = []
             for titre_sec, (cle, paysage) in GROUPES.items():
+                # Les valeurs sont des dicts {"png":..., "svg":...} — les passer tels quels
+                # generer_rapport_pdf sait maintenant gérer ce format
                 figs_sec = list((st.session_state.get(cle) or {}).values())
                 if figs_sec:
                     sections.append({"titre": titre_sec, "figures": figs_sec, "paysage": paysage})

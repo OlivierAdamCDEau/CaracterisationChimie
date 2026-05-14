@@ -662,6 +662,66 @@ def inventaire_stations(df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def synthese_par_station(df: pd.DataFrame, lb_map: dict = None) -> pd.DataFrame:
+    """
+    Tableau de synthèse par station après filtre support/fraction.
+
+    Colonnes produites :
+      Station, Années suivies, Année min, Année max,
+      N campagnes total, N campagnes PCH, N campagnes Métaux, N campagnes Micropolluants,
+      N paramètres total.
+
+    Catégories :
+      PCH           — unité mg/L (hors µg/L)
+      Métaux dissous — codes SANDRE typiques (Cu=1433, Pb=1382, Zn=1436, Cd=1388, etc.)
+                       + label contenant "métal" ou "dissous"
+      Micropolluants — unité µg/L OU ng/L
+    """
+    if df.empty or "CdStationMesureEauxSurface" not in df.columns:
+        return pd.DataFrame()
+
+    lb_map = lb_map or {}
+
+    # Codes SANDRE métaux dissous courants (liste non exhaustive, extensible)
+    CODES_METAUX = {
+        1433, 1382, 1436, 1388, 1392, 1430, 1394, 1396, 1398, 1400,
+        1337, 1372, 1374, 1376, 1378, 1379, 1426, 1428,
+    }
+
+    def _categorie(row):
+        code = row.get("CdParametre")
+        unite = str(row.get("SymUniteMesure", "") or "").strip().lower()
+        lb = str(lb_map.get(code, "") or "").lower()
+        if "µg/l" in unite or "ng/l" in unite or "ug/l" in unite:
+            return "Micropolluants"
+        if code in CODES_METAUX or "métal" in lb or "metal" in lb or "dissous" in lb:
+            return "Métaux dissous"
+        return "PCH"
+
+    df = df.copy()
+    df["_categorie"] = df.apply(_categorie, axis=1)
+    df["_annee"] = df["DatePrel"].dt.year
+
+    rows = []
+    for station, grp in df.groupby("CdStationMesureEauxSurface"):
+        lb_st = grp["LbStationMesureEauxSurface"].iloc[0]                 if "LbStationMesureEauxSurface" in grp.columns else str(station)
+        annees = grp["_annee"].dropna()
+        campagnes = grp["DatePrel"].dropna()
+        rows.append({
+            "Station":               f"{lb_st} ({station})",
+            "N années":              int(annees.nunique()),
+            "Année min":             int(annees.min()) if len(annees) else None,
+            "Année max":             int(annees.max()) if len(annees) else None,
+            "N campagnes total":     int(campagnes.nunique()),
+            "Campagnes PCH":         int(grp[grp["_categorie"] == "PCH"]["DatePrel"].nunique()),
+            "Campagnes Métaux":      int(grp[grp["_categorie"] == "Métaux dissous"]["DatePrel"].nunique()),
+            "Campagnes Micropoll.":  int(grp[grp["_categorie"] == "Micropolluants"]["DatePrel"].nunique()),
+            "N paramètres":          int(grp["CdParametre"].nunique()),
+        })
+
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------
 # 6. Filtres (inchangés, opèrent sur le DataFrame normalisé)
 # ---------------------------------------------------------------------------

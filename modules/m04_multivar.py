@@ -436,10 +436,9 @@ def _placer_labels_biplot(
             lx, ly, label,
             fontsize=fontsize, color=couleur,
             ha=best_ha, va=best_va, zorder=8,
-            clip_on=True,
+            clip_on=False,   # ne pas couper les étiquettes aux bordures
             bbox=dict(boxstyle="round,pad=0.08", fc="white", ec="none", alpha=0.60),
         )
-        txt.set_clip_box(ax.bbox)
         textes_traces.append(txt)
 
         # Enregistrer la boîte retenue
@@ -461,7 +460,7 @@ def biplot_acp(
     axe_y: int = 1,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
-    label_offset: float = 0.055,
+    label_offset: float = 0.032,
     labels_complets: bool = False,
     biplot_separe: bool = False,
     corpus_commun: bool = False,
@@ -746,9 +745,11 @@ def biplot_double_projection(
     lb_stations: Optional[dict] = None,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
+    axe_x: int = 0,
+    axe_y: int = 1,
     labels_complets: bool = False,
     biplot_separe: bool = False,
-    label_offset: float = 0.055,
+    label_offset: float = 0.032,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
     titre: str = "ACP — Double projection (paramètres & familles SANDRE)",
@@ -874,7 +875,7 @@ def biplot_double_projection(
     )
     alertes.extend(msgs)
     if not df_ind.empty:
-        pca_ind, scores_ind, msgs = _calculer_acp(df_ind)
+        pca_ind, scores_ind, msgs = _calculer_acp(df_ind, n_composantes=max(axe_x, axe_y) + 2)
         alertes.extend(msgs)
         var_ind = pca_ind.explained_variance_ratio_ * 100
         load_ind = pca_ind.components_
@@ -885,7 +886,7 @@ def biplot_double_projection(
         pts_st_ind, vecteurs_xy_ind, labels_v_ind, couleurs_v_ind, var_exp_ind = (
             _tracer_biplot(axes[0], df_ind, pca_ind, scores_ind,
                            list(df_ind.columns), lb_map, idx_top_ind, load_ind,
-                           0, 1, var_ind, list(df_ind.index), scale_ind,
+                           axe_x, axe_y, var_ind, list(df_ind.index), scale_ind,
                            avec_ref=True, avec_familles=use_familles,
                            taux_imputation=taux_imp_ind, seuil_imputation=seuil_imputation,
                            labels_complets_=labels_complets)
@@ -908,7 +909,7 @@ def biplot_double_projection(
         lb_fam = {c: c for c in df_fam.columns}
         _tracer_biplot(axes[1], df_fam, pca_fam, scores_fam,
                        list(df_fam.columns), lb_fam, idx_top_fam, load_fam,
-                       0, 1, var_fam, list(df_fam.index), scale_fam,
+                       axe_x, axe_y, var_fam, list(df_fam.index), scale_fam,
                        avec_ref=False, avec_familles=False,
                        taux_imputation={}, seuil_imputation=seuil_imputation,
                        labels_complets_=labels_complets)
@@ -1148,7 +1149,7 @@ def dendrogramme_stations(
                  transform=fig.transFigure,
                  bbox=dict(boxstyle="round,pad=0.3", facecolor="#f0f7ff",
                            edgecolor="#bfdbfe", alpha=0.9))
-        fig.subplots_adjust(bottom=0.05 + 0.022 * len(txt))
+        fig.subplots_adjust(bottom=0.12 + 0.022 * len(txt))
 
     _ajouter_watermark(fig, ax=ax)
     fig.tight_layout()
@@ -1345,7 +1346,9 @@ def figure_multivar_complete(
     lb_stations: Optional[dict] = None,
     n_vecteurs: int = 10,
     echelle_vecteur: float = 1.0,
-    label_offset: float = 0.055,
+    axe_x: int = 0,
+    axe_y: int = 1,
+    label_offset: float = 0.032,
     biplot_separe: bool = False,
     corpus_commun: bool = False,
     seuil_imputation: float = 0.20,
@@ -1386,6 +1389,7 @@ def figure_multivar_complete(
         fam_map=fam_map,
         ordre_stations=ordre_stations, lb_stations=lb_stations,
         n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
+        axe_x=axe_x, axe_y=axe_y,
         label_offset=label_offset,
         labels_complets=corr_labels_complets,
         biplot_separe=biplot_separe,
@@ -1409,6 +1413,7 @@ def figure_multivar_complete(
             fam_map=fam_map,
             ordre_stations=ordre_stations, lb_stations=lb_stations,
             n_vecteurs=n_vecteurs, echelle_vecteur=echelle_vecteur,
+            axe_x=axe_x, axe_y=axe_y,
             labels_complets=corr_labels_complets,
             biplot_separe=biplot_separe,
             label_offset=label_offset,
