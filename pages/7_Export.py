@@ -45,6 +45,81 @@ meta        = st.session_state.get("meta_fichier", {})
 
 st.markdown(f"**{len(toutes_figs)} figure(s) disponibles** dans la session.")
 
+# ── Section 0 : Récapitulatif du paramétrage ─────────────────────────────────
+st.markdown("### 📋 Récapitulatif du paramétrage")
+with st.expander("Voir le détail des filtres et options appliqués", expanded=True):
+
+    # ── Données ────────────────────────────────────────────────────────────────
+    st.markdown("**📂 Données chargées**")
+    col_d1, col_d2, col_d3 = st.columns(3)
+    col_d1.metric("Fichier(s)", meta.get("nom", "—"))
+    col_d2.metric("Stations", meta.get("n_stations", "—"))
+    col_d3.metric("Période", meta.get("periode", "—"))
+
+    sources = meta.get("sources", {})
+    if sources:
+        LABELS_SRC = {
+            "naiade": "Naïades chimie", "ades": "ADES",
+            "ars": "ARS/CAP", "hb": "HB-Naïades",
+        }
+        src_txt = " | ".join(
+            f"**{LABELS_SRC.get(k,k)}** : {v:,}" for k, v in sources.items()
+        )
+        st.markdown(f"Sources : {src_txt}")
+
+    bv_nom = st.session_state.get("bv_actif_nom")
+    ordre  = st.session_state.get("ordre_stations")
+    if bv_nom and ordre:
+        st.markdown(
+            f"BV actif : **{bv_nom}** — "
+            + " → ".join(lb_stations.get(s, s) for s in ordre)
+        )
+
+    st.markdown("---")
+
+    # ── Configuration ──────────────────────────────────────────────────────────
+    cfg = st.session_state.get("config_params", {})
+    if cfg:
+        st.markdown("**⚙️ Configuration appliquée**")
+        col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+        col_c1.metric("N paramètres", cfg.get("n_params", "—"))
+        col_c2.metric("N stations (pivot)", cfg.get("n_stations", "—"))
+        col_c3.metric("Normalisation", cfg.get("normalisation", "—"))
+        col_c4.metric("Valeur pivot", cfg.get("valeur_pivot", "—"))
+        col_c5, col_c6, col_c7, col_c8 = st.columns(4)
+        col_c5.metric("Seuil PCH (%)", cfg.get("seuil_pch_pct", "—"))
+        col_c6.metric("Seuil Micropoll. (%)", cfg.get("seuil_micro_pct", "—"))
+        col_c7.metric("Censure <LQ", cfg.get("methode_censure", "—"))
+        col_c8.metric("Familles chargées", "Oui" if cfg.get("familles_chargees") else "Non")
+
+    params_sel = st.session_state.get("params_selectionnes", [])
+    if params_sel:
+        st.markdown(f"**Paramètres analysés** ({len(params_sel)}) :")
+        _lb_map_exp = st.session_state.get("lb_map", {})
+        params_txt = ", ".join(
+            _lb_map_exp.get(p, str(p)) for p in sorted(params_sel)[:30]
+        )
+        if len(params_sel) > 30:
+            params_txt += f" … (+{len(params_sel)-30} autres)"
+        st.caption(params_txt)
+
+    st.markdown("---")
+
+    # ── Modules calculés ──────────────────────────────────────────────────────
+    st.markdown("**🔬 Modules calculés**")
+    MODULES = {
+        "Empreinte signature":    "m03_calcule",
+        "Analyses multivariées": "m04_calcule",
+        "Variabilité temporelle":"m05_calcule",
+        "Débit et chimie":       "m06_calcule",
+    }
+    cols_m = st.columns(4)
+    for col_m, (nom_m, cle_m) in zip(cols_m, MODULES.items()):
+        done = st.session_state.get(cle_m, False)
+        col_m.markdown(
+            f"{'✅' if done else '⬜'} {nom_m}",
+        )
+
 # ── Section 1 : Figures individuelles ────────────────────────────────────────
 st.markdown("### 1. Figures individuelles")
 if toutes_figs:
@@ -134,7 +209,7 @@ if st.button("📄 Générer le rapport PDF", type="primary", disabled=(not tout
         try:
             # Construire les sections par module
             GROUPES = {
-                "Empreinte chimique":    ("figs_m03", False),
+                "Empreinte signature":   ("figs_m03", False),
                 "Analyses multivariées": ("figs_m04", False),
                 "Variabilité temporelle":("figs_m05", True),   # paysage
                 "Débit et chimie":       ("figs_m06", True),
@@ -156,6 +231,29 @@ if st.button("📄 Générer le rapport PDF", type="primary", disabled=(not tout
             stations_lb = list(lb_stations.values())
             stations_cd = list(lb_stations.keys())
 
+            # Récapitulatif paramétrage pour la page de garde PDF
+            _cfg = st.session_state.get("config_params", {})
+            _params_sel = st.session_state.get("params_selectionnes", [])
+            _lb_map_pdf = st.session_state.get("lb_map", {})
+            parametrage_pdf = {
+                "Fichier(s)": meta.get("nom", "—"),
+                "Période": meta.get("periode", "—"),
+                "N stations": meta.get("n_stations", "—"),
+                "Sources": ", ".join(meta.get("sources", {}).keys()) or "—",
+                "N paramètres": len(_params_sel),
+                "Normalisation": _cfg.get("normalisation", "—"),
+                "Valeur pivot": _cfg.get("valeur_pivot", "—"),
+                "Censure <LQ": _cfg.get("methode_censure", "—"),
+                "Seuil PCH (%)": _cfg.get("seuil_pch_pct", "—"),
+                "Seuil Micropoll. (%)": _cfg.get("seuil_micro_pct", "—"),
+                "Familles chimiques": "Oui" if _cfg.get("familles_chargees") else "Non",
+                "BV actif": st.session_state.get("bv_actif_nom", "—") or "—",
+                "Paramètres": (", ".join(_lb_map_pdf.get(p, str(p))
+                               for p in sorted(_params_sel)[:20])
+                               + (f" (+{len(_params_sel)-20} autres)"
+                                  if len(_params_sel) > 20 else ""))
+            }
+
             pdf_bytes = generer_rapport_pdf(
                 sections,
                 titre_rapport=titre_rapport,
@@ -163,6 +261,7 @@ if st.button("📄 Générer le rapport PDF", type="primary", disabled=(not tout
                 stations_codes=stations_cd,
                 periode=meta.get("periode", ""),
                 auteur=auteur,
+                parametrage=parametrage_pdf,
             )
             st.download_button(
                 "⬇️ Télécharger le rapport PDF",
@@ -183,7 +282,7 @@ if st.button("📦 Générer le bundle ZIP", disabled=(not toutes_figs)):
         try:
             # Régénérer le PDF pour l'inclure
             GROUPES = {
-                "Empreinte chimique":    ("figs_m03", False),
+                "Empreinte signature":   ("figs_m03", False),
                 "Analyses multivariées": ("figs_m04", False),
                 "Variabilité temporelle":("figs_m05", True),
                 "Débit et chimie":       ("figs_m06", True),
@@ -201,6 +300,7 @@ if st.button("📦 Générer le bundle ZIP", disabled=(not toutes_figs)):
                 stations=list(lb_stations.values()),
                 stations_codes=list(lb_stations.keys()),
                 periode=meta.get("periode", ""), auteur=auteur,
+                parametrage=parametrage_pdf if "parametrage_pdf" in dir() else {},
             ) if sections else None
 
             zip_bytes = generer_zip(

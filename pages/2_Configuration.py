@@ -158,6 +158,19 @@ if st.button(btn_label, type="primary", use_container_width=True, disabled=(df_f
                 }
 
             invalider_depuis_config()
+            # Stocker le paramétrage pour le récapitulatif export
+            _config_params = {
+                "seuil_pch_pct":       seuil_pch,
+                "seuil_micro_pct":     seuil_micro,
+                "methode_censure":     methode_censure,
+                "valeur_pivot":        valeur_pivot,
+                "normalisation":       normalisation,
+                "ph_borne":            ph_borne,
+                "cond_borne":          cond_borne,
+                "n_params":            len(res["pivot_norm"].columns),
+                "n_stations":          res["pivot_norm"].shape[0],
+                "familles_chargees":   bool(fam_map),
+            }
             st.session_state.update({
                 "df_clean": res["df_clean"], "df_stats": res["df_stats"],
                 "pivot": res["pivot"], "pivot_norm": res["pivot_norm"],
@@ -166,6 +179,7 @@ if st.button(btn_label, type="primary", use_container_width=True, disabled=(df_f
                 "lb_map": res["lb_map"], "fam_map": fam_map,
                 "df_ref": df_ref, "df_seuils": df_seuils,
                 "params_selectionnes": list(res["pivot_norm"].columns),
+                "config_params": _config_params,
                 "config_chargee": True,
             })
             for a in res.get("alertes", []):

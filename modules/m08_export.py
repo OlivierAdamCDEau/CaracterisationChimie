@@ -690,6 +690,7 @@ def generer_rapport_pdf(
     periode: Optional[str] = None,
     auteur: str = "@CDEau",
     date_rapport: Optional[str] = None,
+    parametrage: Optional[dict] = None,
 ) -> bytes:
     """
     Génère un rapport PDF structuré multi-modules avec watermark @CDEau.
@@ -838,6 +839,31 @@ def generer_rapport_pdf(
             ("LEFTPADDING",  (0, 0), (-1, -1), 6),
         ]))
         story.append(t_st)
+
+    # ── Tableau de paramétrage (si fourni) ───────────────────────────────────
+    if parametrage:
+        story.append(Spacer(1, 0.4 * cm))
+        story.append(HRFlowable(width="80%", thickness=0.5,
+                                 color=COULEUR_TITRE, spaceAfter=8))
+        story.append(Paragraph("Paramétrage et filtres appliqués", st_titre_section))
+        data_cfg = [[Paragraph("Paramètre", st_garde_th),
+                     Paragraph("Valeur", st_garde_th)]]
+        for k, v in parametrage.items():
+            data_cfg.append([
+                Paragraph(str(k), st_garde_td),
+                Paragraph(str(v), st_garde_td),
+            ])
+        t_cfg = Table(data_cfg, colWidths=[6 * cm, 10 * cm], hAlign="CENTER")
+        t_cfg.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COULEUR_TITRE),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.white, colors.HexColor("#f0f7ff")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(t_cfg)
 
     story.append(Spacer(1, 0.6 * cm))
     story.append(Paragraph(f"Date : {date_rapport}", st_meta))
